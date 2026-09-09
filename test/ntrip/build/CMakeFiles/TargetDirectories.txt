@@ -1,3 +1,0 @@
-/home/test/ntrip/build/CMakeFiles/ntrip.dir
-/home/test/ntrip/build/CMakeFiles/edit_cache.dir
-/home/test/ntrip/build/CMakeFiles/rebuild_cache.dir

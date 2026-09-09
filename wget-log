@@ -1,6 +1,0 @@
---2026-05-21 03:23:16--  https://imag-data.bgs.ac.uk/GIN_V1/GINServices?Request=GetData
-Resolving imag-data.bgs.ac.uk (imag-data.bgs.ac.uk)... 192.171.157.15
-Connecting to imag-data.bgs.ac.uk (imag-data.bgs.ac.uk)|192.171.157.15|:443... connected.
-HTTP request sent, awaiting response... 400 Bad Request
-2026-05-21 03:23:17 ERROR 400: Bad Request.
-
