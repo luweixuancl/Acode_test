@@ -8,6 +8,7 @@ class NtpServer {
  public:
   void begin();
   void loop(const GpsService& gps);
+  uint32_t requestCount() const { return requestCount_; }
 
  private:
   void handlePacket(const GpsService& gps);
@@ -15,4 +16,5 @@ class NtpServer {
 
   WiFiUDP udp_;
   uint8_t packet_[48];
+  uint32_t requestCount_ = 0;
 };

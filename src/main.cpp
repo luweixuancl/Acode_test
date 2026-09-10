@@ -21,7 +21,7 @@ EncoderInput gEnc;
 DisplayUi gUi;
 StatusLeds gLeds;
 
-bool gWebPortalActive = false;
+bool gSetupAp = false;
 
 void connectFromCredentials(const String& ssid, const String& pass) {
   gSettings.wifiSsid = ssid;
@@ -31,11 +31,12 @@ void connectFromCredentials(const String& ssid, const String& pass) {
   bool ok = gWifi.connectSta(gSettings);
   if (ok) {
     gUi.showMessage(String("OK ") + gWifi.localIp().toString());
-    if (gWebPortalActive) {
-      // Keep AP briefly then drop to STA-only
+    Serial.printf("STA IP: %s  (http://%s/)\n", gWifi.localIp().toString().c_str(),
+                  gWifi.localIp().toString().c_str());
+    if (gSetupAp) {
       delay(500);
       gWifi.stopAp();
-      gWebPortalActive = false;
+      gSetupAp = false;
     }
   } else {
     gUi.showMessage("WiFi failed");
@@ -56,15 +57,15 @@ void setup() {
   gGps.begin();
   gWifi.begin(gSettings);
   gNtp.begin();
+  gPortal.begin(&gWifi, &gStore, &gSettings, &gGps, &gNtp);
 
   if (!gWifi.isStaConnected()) {
-    // Auto-start setup AP when no WiFi yet
     gWifi.startSetupAp();
-    gPortal.begin(&gWifi, &gStore, &gSettings);
-    gWebPortalActive = true;
+    gSetupAp = true;
     gUi.showMessage("AP setup mode");
   } else {
-    Serial.printf("STA IP: %s\n", gWifi.localIp().toString().c_str());
+    Serial.printf("STA IP: %s  (http://%s/)\n", gWifi.localIp().toString().c_str(),
+                  gWifi.localIp().toString().c_str());
   }
 }
 
@@ -72,11 +73,11 @@ void loop() {
   gGps.loop();
   gEnc.loop();
   gNtp.loop(gGps);
-  gLeds.loop(gWebPortalActive, gWifi.isStaConnected(), gGps);
+  gLeds.loop(gSetupAp, gWifi.isStaConnected(), gGps);
   gUi.loop(gEnc, gGps, gWifi, gSettings, gStore);
 
-  if (gWebPortalActive) {
-    gPortal.loop();
+  gPortal.loop();
+  {
     String ssid, pass;
     if (gPortal.consumeConnectRequest(ssid, pass)) {
       connectFromCredentials(ssid, pass);
@@ -90,10 +91,7 @@ void loop() {
 
   if (gUi.takeStartWebSetup()) {
     gWifi.startSetupAp();
-    if (!gWebPortalActive) {
-      gPortal.begin(&gWifi, &gStore, &gSettings);
-      gWebPortalActive = true;
-    }
+    gSetupAp = true;
   }
 
   if (gUi.takeUseDhcp()) {

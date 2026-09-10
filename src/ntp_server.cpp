@@ -32,6 +32,7 @@ void NtpServer::handlePacket(const GpsService& gps) {
   if (len < 48) {
     return;
   }
+  requestCount_++;
 
   uint32_t recvSec = 0;
   uint32_t recvFrac = 0;
