@@ -1,11 +1,11 @@
 # ESP32-C3 GNSS NTP Server
 
-基于 **ESP32-C3** + **大夏龙雀 DX-GP22** 的一级（Stratum-1）NTP 时间服务器。
+基于 **合宙 CORE ESP32-C3** + **大夏龙雀 DX-GP22** 的一级（Stratum-1）NTP 时间服务器。
 
 ## 功能
 
 1. **OLED 状态页**：显示 IP、GPS 锁定/搜星数、PPS、本地时间
-2. **双状态 LED**：D4（GPIO12）显示运行/WiFi，D5（GPIO13）显示 GPS/PPS，高电平点亮
+2. **板载双状态 LED**（合宙 CORE 表4-1）：D4（IO12）显示运行/WiFi，D5（IO13）显示 GPS/PPS，高电平有效
 3. **旋转编码器菜单**：扫描 WiFi、网页配网、静态 IP、DHCP、时区、重启
 4. **手动静态 IP**：编码器逐字节编辑；保存时通过 **ARP 探测**检测局域网是否已有相同 IP
 5. **编码器配网**：扫描附近 WiFi → 选择 SSID → 编码器输入密码 → 连接
@@ -27,9 +27,8 @@
 | KY-040 | DT(B) | 3 |
 | KY-040 | SW | 5 |
 | KY-040 | + / GND | 3.3V / GND |
-| LED D4 | 阳极（经限流电阻） | 12（高电平亮） |
-| LED D5 | 阳极（经限流电阻） | 13（高电平亮） |
-| LED D4/D5 | 阴极 | GND |
+| 合宙 CORE 板载 D4 | IO12 | 12（高电平有效） |
+| 合宙 CORE 板载 D5 | IO13 | 13（高电平有效） |
 
 引脚可在 `include/config.h` 中修改。
 

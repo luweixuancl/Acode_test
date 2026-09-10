@@ -1,7 +1,7 @@
 #pragma once
 
 // ---------------------------------------------------------------------------
-// Hardware wiring (ESP32-C3 + DX-GP22 + SSD1306 + KY-040)
+// Hardware wiring (合宙 CORE ESP32-C3 + DX-GP22 + SSD1306 + KY-040)
 // Adjust these pins if your carrier board differs.
 // ---------------------------------------------------------------------------
 
@@ -24,9 +24,9 @@
 #define PIN_ENC_B            3
 #define PIN_ENC_SW           5
 
-// Status LEDs (active HIGH)
-#define PIN_LED_D4          12   // RUN / WiFi
-#define PIN_LED_D5          13   // GPS / PPS / NTP ready
+// On-board LEDs on 合宙 CORE ESP32 (datasheet 表4-1): D4=IO12, D5=IO13, active HIGH
+#define PIN_LED_D4          12   // D4 RUN / WiFi
+#define PIN_LED_D5          13   // D5 GPS / PPS / NTP ready
 
 // SoftAP for web WiFi setup
 #define AP_SSID_PREFIX      "NTP-Setup"

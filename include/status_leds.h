@@ -2,7 +2,7 @@
 
 #include "gps_service.h"
 
-// D4 (GPIO12) and D5 (GPIO13), active HIGH.
+// 合宙 CORE ESP32 on-board LEDs: D4=GPIO12, D5=GPIO13, active HIGH.
 // D4: device / network. D5: GNSS time quality.
 class StatusLeds {
  public:
