@@ -9,6 +9,7 @@
 #include "web_portal.h"
 #include "encoder.h"
 #include "display_ui.h"
+#include "status_leds.h"
 
 SettingsStore gStore;
 AppSettings gSettings;
@@ -18,6 +19,7 @@ WifiManager gWifi;
 WebPortal gPortal;
 EncoderInput gEnc;
 DisplayUi gUi;
+StatusLeds gLeds;
 
 bool gWebPortalActive = false;
 
@@ -49,6 +51,7 @@ void setup() {
   gSettings = gStore.load();
 
   gEnc.begin();
+  gLeds.begin();
   gUi.begin();
   gGps.begin();
   gWifi.begin(gSettings);
@@ -69,6 +72,7 @@ void loop() {
   gGps.loop();
   gEnc.loop();
   gNtp.loop(gGps);
+  gLeds.loop(gWebPortalActive, gWifi.isStaConnected(), gGps);
   gUi.loop(gEnc, gGps, gWifi, gSettings, gStore);
 
   if (gWebPortalActive) {

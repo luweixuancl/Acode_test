@@ -24,6 +24,10 @@
 #define PIN_ENC_B            3
 #define PIN_ENC_SW           5
 
+// Status LEDs (active HIGH)
+#define PIN_LED_D4          12   // RUN / WiFi
+#define PIN_LED_D5          13   // GPS / PPS / NTP ready
+
 // SoftAP for web WiFi setup
 #define AP_SSID_PREFIX      "NTP-Setup"
 #define AP_PASSWORD         "12345678"

@@ -22,6 +22,8 @@ class GpsService {
   void begin();
   void loop();
   const GpsStatus& status() const { return status_; }
+  // True when a PPS edge was seen within the last 1.5 s.
+  bool ppsFresh() const;
   // Best-effort current UTC unix time using last RMC + millis since PPS.
   bool nowUtc(uint32_t& seconds, uint32_t& fraction) const;
 

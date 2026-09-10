@@ -79,6 +79,13 @@ void GpsService::parseNmea() {
   }
 }
 
+bool GpsService::ppsFresh() const {
+  if (ppsMillis_ == 0) {
+    return false;
+  }
+  return (millis() - ppsMillis_) < 1500;
+}
+
 bool GpsService::nowUtc(uint32_t& seconds, uint32_t& fraction) const {
   if (!status_.validFix || status_.utcEpoch == 0) {
     return false;
