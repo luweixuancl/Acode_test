@@ -5,12 +5,15 @@
 // Adjust these pins if your carrier board differs.
 // ---------------------------------------------------------------------------
 
-// DX-GP22 GNSS (UART, default 9600 8N1; 1PPS after fix)
-#define PIN_GPS_RX          20   // ESP32 RX <- GP22 TXD
-#define PIN_GPS_TX          21   // ESP32 TX -> GP22 RXD
+// UART0 (合宙 CORE / CH343): GPIO20 RX, GPIO21 TX — debug via Serial @ 115200
+// DX-GP22 GNSS on UART1 (board UART1_RX=GPIO1, UART1_TX=GPIO0; 9600 8N1; 1PPS after fix)
+#define PIN_GPS_RX           1   // ESP32 RX <- GP22 TXD  (UART1_RX)
+#define PIN_GPS_TX           0   // ESP32 TX -> GP22 RXD  (UART1_TX)
 #define PIN_GPS_PPS          4   // 1PPS input
 #define GPS_UART_BAUD     9600
 #define GPS_UART_NUM         1
+#define GPS_DEBUG            1   // 1 = 每秒向 UART0 打印定位/PPS
+#define GPS_DEBUG_NMEA       0   // 1 = 把 NMEA 原文转发到 UART0
 
 // SSD1306 128x64 OLED over I2C
 #define PIN_OLED_SDA         8

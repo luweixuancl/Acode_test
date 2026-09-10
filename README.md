@@ -15,8 +15,8 @@
 
 | 模块 | 信号 | ESP32-C3 GPIO |
 |------|------|---------------|
-| DX-GP22 | TXD | 20 (RX) |
-| DX-GP22 | RXD | 21 (TX) |
+| DX-GP22 | TXD | 1 (UART1 RX) |
+| DX-GP22 | RXD | 0 (UART1 TX) |
 | DX-GP22 | 1PPS | 4 |
 | DX-GP22 | VCC | 3.3V 或 5V（按模块说明） |
 | DX-GP22 | GND | GND |
@@ -31,6 +31,8 @@
 | 合宙 CORE 板载 D5 | IO13 | 13（高电平有效） |
 
 引脚可在 `include/config.h` 中修改。
+
+**串口分工**：GPIO20/21 是 UART0（板载 CH343 下载/调试，115200）。GNSS 走 UART1（GPIO1 RX / GPIO0 TX，9600）。`pio device monitor` 看的是调试口，不是 GPS。
 
 ### 状态 LED
 

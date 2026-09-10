@@ -34,6 +34,7 @@ class GpsService {
   HardwareSerial gpsSerial_{GPS_UART_NUM};
   TinyGPSPlus gps_;
   GpsStatus status_;
+  uint32_t lastDebugMs_ = 0;
 
   static volatile uint32_t ppsMillis_;
   static volatile uint32_t ppsCount_;

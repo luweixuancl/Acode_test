@@ -14,6 +14,8 @@ void GpsService::begin() {
   pinMode(PIN_GPS_PPS, INPUT_PULLDOWN);
   attachInterrupt(digitalPinToInterrupt(PIN_GPS_PPS), onPpsIsr, RISING);
   gpsSerial_.begin(GPS_UART_BAUD, SERIAL_8N1, PIN_GPS_RX, PIN_GPS_TX);
+  Serial.printf("GPS UART%d RX=%d TX=%d baud=%d\n", GPS_UART_NUM, PIN_GPS_RX, PIN_GPS_TX,
+                GPS_UART_BAUD);
 }
 
 void GpsService::loop() {
@@ -71,11 +73,26 @@ void GpsService::loop() {
   } else {
     status_.ageMs = 0xFFFFFFFF;
   }
+
+#if GPS_DEBUG
+  const uint32_t now = millis();
+  if (now - lastDebugMs_ >= 1000) {
+    lastDebugMs_ = now;
+    Serial.printf("GPS fix=%d sat=%u pps=%u age=%lu utc=%lu\n",
+                  status_.validFix ? 1 : 0, status_.satellites, status_.ppsCount,
+                  static_cast<unsigned long>(status_.ageMs),
+                  static_cast<unsigned long>(status_.utcEpoch));
+  }
+#endif
 }
 
 void GpsService::parseNmea() {
   while (gpsSerial_.available() > 0) {
-    gps_.encode(static_cast<char>(gpsSerial_.read()));
+    const char c = static_cast<char>(gpsSerial_.read());
+    gps_.encode(c);
+#if GPS_DEBUG_NMEA
+    Serial.write(c);
+#endif
   }
 }
 

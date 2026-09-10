@@ -43,7 +43,7 @@ void connectFromCredentials(const String& ssid, const String& pass) {
 }
 
 void setup() {
-  Serial.begin(115200);
+  Serial.begin(115200);  // UART0 GPIO20/21 (CH343 调试)
   delay(200);
   Serial.println("\nESP32-C3 GNSS NTP Server");
 
