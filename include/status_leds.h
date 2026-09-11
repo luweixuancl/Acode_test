@@ -3,11 +3,11 @@
 #include "gps_service.h"
 
 // 合宙 CORE ESP32 on-board LEDs: D4=GPIO12, D5=GPIO13, active HIGH.
-// D4: device / network. D5: GNSS time quality.
 class StatusLeds {
  public:
   void begin();
-  void loop(bool apMode, bool wifiStaOk, const GpsService& gps);
+  // Prefer passing a snapshot so UI task never races GPS writers.
+  void loop(bool apMode, bool wifiStaOk, const GpsStatus& st);
 
  private:
   static void writeBlink(uint8_t pin, uint32_t nowMs, uint32_t halfPeriodMs);

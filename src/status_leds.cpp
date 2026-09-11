@@ -13,14 +13,13 @@ void StatusLeds::writeBlink(uint8_t pin, uint32_t nowMs, uint32_t halfPeriodMs) 
   digitalWrite(pin, on ? HIGH : LOW);
 }
 
-void StatusLeds::loop(bool apMode, bool wifiStaOk, const GpsService& gps) {
+void StatusLeds::loop(bool apMode, bool wifiStaOk, const GpsStatus& st) {
   const uint32_t now = millis();
   if (now - lastUpdateMs_ < 20) {
     return;
   }
   lastUpdateMs_ = now;
 
-  // D4 RUN: fast blink in AP/setup, slow blink if no STA, solid when WiFi is up.
   if (wifiStaOk) {
     digitalWrite(PIN_LED_D4, HIGH);
   } else if (apMode) {
@@ -29,9 +28,7 @@ void StatusLeds::loop(bool apMode, bool wifiStaOk, const GpsService& gps) {
     writeBlink(PIN_LED_D4, now, 500);
   }
 
-  // D5 SYNC: off = no fix, blink = fix without PPS, solid = Stratum-1 ready.
-  const GpsStatus& st = gps.status();
-  if (st.validFix && gps.ppsFresh()) {
+  if (st.validFix && st.ppsFresh && st.timeValid) {
     digitalWrite(PIN_LED_D5, HIGH);
   } else if (st.validFix || st.satellites > 0) {
     writeBlink(PIN_LED_D5, now, 400);

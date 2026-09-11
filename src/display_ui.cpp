@@ -1,4 +1,5 @@
 #include "display_ui.h"
+#include "app_ipc.h"
 #include <Wire.h>
 #include <WiFi.h>
 
@@ -13,10 +14,10 @@ static const char* MENU_LABELS[] = {
 
 static const char PWD_CHARS[] =
     "<ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%&*-_.";
-// '<' means backspace when appended via click
 
 void DisplayUi::begin() {
   Wire.begin(PIN_OLED_SDA, PIN_OLED_SCL);
+  Wire.setClock(400000);
   if (!display_.begin(SSD1306_SWITCHCAPVCC, OLED_I2C_ADDR)) {
     Serial.println("SSD1306 init failed");
   }
@@ -35,45 +36,38 @@ void DisplayUi::showMessage(const String& msg) {
   mode_ = UiMode::Message;
 }
 
-bool DisplayUi::takePendingWifi(String& ssid, String& pass) {
-  if (!pendingWifi_) {
-    return false;
-  }
-  pendingWifi_ = false;
-  ssid = pendingSsid_;
-  pass = pendingPass_;
-  return true;
+void DisplayUi::onScanResults(const std::vector<WifiNetwork>& nets) {
+  networks_ = nets;
+  wifiIndex_ = 0;
+  scanPending_ = false;
+  mode_ = UiMode::WifiScan;
+  messageUntil_ = 0;
 }
 
-bool DisplayUi::takeApplyStaticIp() {
-  if (!pendingStatic_) {
-    return false;
+void DisplayUi::drainUiMessages() {
+  if (!gIpc.uiMsg) {
+    return;
   }
-  pendingStatic_ = false;
-  return true;
+  UiMsg msg;
+  while (xQueueReceive(gIpc.uiMsg, &msg, 0) == pdTRUE) {
+    if (msg.type == UiMsgType::Text) {
+      showMessage(String(msg.text));
+    } else if (msg.type == UiMsgType::ScanResult) {
+      if (xSemaphoreTake(gIpc.scanMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+        onScanResults(gIpc.scanResults);
+        gIpc.scanReady = false;
+        xSemaphoreGive(gIpc.scanMutex);
+      }
+    } else if (msg.type == UiMsgType::ScanFailed) {
+      scanPending_ = false;
+      showMessage("Scan failed");
+    }
+  }
 }
 
-bool DisplayUi::takeStartWebSetup() {
-  if (!pendingWeb_) {
-    return false;
-  }
-  pendingWeb_ = false;
-  return true;
-}
+void DisplayUi::loop(EncoderInput& enc, GpsService& gps, WifiManager& wifi) {
+  drainUiMessages();
 
-bool DisplayUi::takeUseDhcp() {
-  if (!pendingDhcp_) {
-    return false;
-  }
-  pendingDhcp_ = false;
-  return true;
-}
-
-void DisplayUi::loop(EncoderInput& enc,
-                     GpsService& gps,
-                     WifiManager& wifi,
-                     AppSettings& settings,
-                     SettingsStore& store) {
   int8_t rot = enc.consumeRotate();
   bool click = enc.consumeClick();
   bool longPress = enc.consumeLongPress();
@@ -83,19 +77,19 @@ void DisplayUi::loop(EncoderInput& enc,
       handleHome(rot, click);
       break;
     case UiMode::Menu:
-      handleMenu(rot, click, longPress, settings, store);
+      handleMenu(rot, click, longPress);
       break;
     case UiMode::WifiScan:
-      handleWifiScan(rot, click, wifi);
+      handleWifiScan(rot, click);
       break;
     case UiMode::WifiPassword:
       handlePassword(rot, click, longPress);
       break;
     case UiMode::SetIp:
-      handleSetIp(rot, click, longPress, settings, store, wifi);
+      handleSetIp(rot, click, longPress);
       break;
     case UiMode::SetTimezone:
-      handleTimezone(rot, click, settings, store);
+      handleTimezone(rot, click);
       break;
     case UiMode::WebSetupHint:
       if (click || longPress) {
@@ -114,12 +108,20 @@ void DisplayUi::loop(EncoderInput& enc,
   }
   lastDrawMs_ = millis();
 
+  AppSettings settings;
+  if (settingsLock(pdMS_TO_TICKS(20))) {
+    settings = gSettings;
+    settingsUnlock();
+  }
+
+  const GpsStatus st = gps.snapshot();
+
   display_.clearDisplay();
   display_.setTextSize(1);
   display_.setTextColor(SSD1306_WHITE);
   switch (mode_) {
     case UiMode::Home:
-      drawHome(gps, wifi, settings);
+      drawHome(st, wifi, settings);
       break;
     case UiMode::Menu:
       drawMenu();
@@ -146,8 +148,7 @@ void DisplayUi::loop(EncoderInput& enc,
   display_.display();
 }
 
-void DisplayUi::drawHome(const GpsService& gps, const WifiManager& wifi, const AppSettings& settings) {
-  const auto& st = gps.status();
+void DisplayUi::drawHome(const GpsStatus& st, const WifiManager& wifi, const AppSettings& settings) {
   display_.setCursor(0, 0);
   display_.println("ESP32-C3 NTP Srv");
 
@@ -172,7 +173,7 @@ void DisplayUi::drawHome(const GpsService& gps, const WifiManager& wifi, const A
 
   display_.setCursor(0, 36);
   display_.print("PPS ");
-  display_.print(st.ppsSeen ? "OK" : "--");
+  display_.print(st.ppsFresh ? "OK" : "--");
   display_.print("  TZ");
   if (settings.timezoneHours >= 0) {
     display_.print("+");
@@ -180,7 +181,7 @@ void DisplayUi::drawHome(const GpsService& gps, const WifiManager& wifi, const A
   display_.print(settings.timezoneHours);
 
   display_.setCursor(0, 48);
-  if (st.validFix && st.utcEpoch > 0) {
+  if (st.timeValid && st.utcEpoch > 0) {
     time_t local = static_cast<time_t>(st.utcEpoch) + settings.timezoneHours * 3600L;
     struct tm* tm = gmtime(&local);
     char buf[20];
@@ -206,6 +207,11 @@ void DisplayUi::drawMenu() {
 void DisplayUi::drawWifiScan() {
   display_.setCursor(0, 0);
   display_.println("WiFi list click=OK");
+  if (scanPending_) {
+    display_.setCursor(0, 20);
+    display_.println("Scanning...");
+    return;
+  }
   if (networks_.empty()) {
     display_.setCursor(0, 20);
     display_.println("Empty. Click scan");
@@ -315,9 +321,7 @@ void DisplayUi::handleHome(int8_t rot, bool click) {
   }
 }
 
-void DisplayUi::handleMenu(int8_t rot, bool click, bool longPress, AppSettings& settings, SettingsStore& store) {
-  (void)settings;
-  (void)store;
+void DisplayUi::handleMenu(int8_t rot, bool click, bool longPress) {
   if (longPress) {
     mode_ = UiMode::Home;
     return;
@@ -335,21 +339,31 @@ void DisplayUi::handleMenu(int8_t rot, bool click, bool longPress, AppSettings& 
     case MenuItem::WifiScan:
       networks_.clear();
       wifiIndex_ = 0;
+      scanPending_ = false;
       mode_ = UiMode::WifiScan;
       break;
-    case MenuItem::WebSetup:
-      pendingWeb_ = true;
+    case MenuItem::WebSetup: {
+      NetRequest req;
+      req.type = NetReqType::StartWebSetup;
+      postNetRequest(req);
       mode_ = UiMode::WebSetupHint;
       break;
+    }
     case MenuItem::SetStaticIp:
-      editIp_ = settings.staticIp;
+      if (settingsLock(pdMS_TO_TICKS(50))) {
+        editIp_ = gSettings.staticIp;
+        settingsUnlock();
+      }
       ipOctet_ = 0;
       mode_ = UiMode::SetIp;
       break;
-    case MenuItem::UseDhcp:
-      pendingDhcp_ = true;
+    case MenuItem::UseDhcp: {
+      NetRequest req;
+      req.type = NetReqType::UseDhcp;
+      postNetRequest(req);
       showMessage("DHCP enabled");
       break;
+    }
     case MenuItem::Timezone:
       mode_ = UiMode::SetTimezone;
       break;
@@ -361,16 +375,21 @@ void DisplayUi::handleMenu(int8_t rot, bool click, bool longPress, AppSettings& 
   }
 }
 
-void DisplayUi::handleWifiScan(int8_t rot, bool click, WifiManager& wifi) {
-  if (networks_.empty()) {
+void DisplayUi::handleWifiScan(int8_t rot, bool click) {
+  if (networks_.empty() && !scanPending_) {
     if (click) {
-      showMessage("Scanning...");
-      display_.display();
-      networks_ = wifi.scanNetworks();
-      wifiIndex_ = 0;
-      mode_ = UiMode::WifiScan;
-      messageUntil_ = 0;
+      NetRequest req;
+      req.type = NetReqType::ScanWifi;
+      if (postNetRequest(req)) {
+        scanPending_ = true;
+        showMessage("Scanning...");
+      } else {
+        showMessage("Scan busy");
+      }
     }
+    return;
+  }
+  if (scanPending_) {
     return;
   }
   if (rot > 0 && wifiIndex_ + 1 < networks_.size()) {
@@ -378,7 +397,7 @@ void DisplayUi::handleWifiScan(int8_t rot, bool click, WifiManager& wifi) {
   } else if (rot < 0 && wifiIndex_ > 0) {
     wifiIndex_--;
   }
-  if (click) {
+  if (click && !networks_.empty()) {
     pendingSsid_ = networks_[wifiIndex_].ssid;
     password_ = "";
     pwdCursor_ = 0;
@@ -404,15 +423,16 @@ void DisplayUi::handlePassword(int8_t rot, bool click, bool longPress) {
     }
   }
   if (longPress) {
-    pendingPass_ = password_;
-    pendingWifi_ = true;
+    NetRequest req;
+    req.type = NetReqType::ConnectWifi;
+    strncpy(req.ssid, pendingSsid_.c_str(), sizeof(req.ssid) - 1);
+    strncpy(req.pass, password_.c_str(), sizeof(req.pass) - 1);
+    postNetRequest(req);
     showMessage("Connecting...");
   }
 }
 
-void DisplayUi::handleSetIp(int8_t rot, bool click, bool longPress, AppSettings& settings,
-                            SettingsStore& store, WifiManager& wifi) {
-  (void)wifi;
+void DisplayUi::handleSetIp(int8_t rot, bool click, bool longPress) {
   if (rot != 0) {
     int v = editIp_[ipOctet_] + rot;
     if (v < 0) {
@@ -427,29 +447,40 @@ void DisplayUi::handleSetIp(int8_t rot, bool click, bool longPress, AppSettings&
     ipOctet_ = (ipOctet_ + 1) % 4;
   }
   if (longPress) {
-    settings.staticIp = editIp_;
-    settings.useStaticIp = true;
-    // Default gateway to x.x.x.1 on same subnet if unset/mismatched
-    settings.gateway = IPAddress(editIp_[0], editIp_[1], editIp_[2], 1);
-    store.save(settings);
-    pendingStatic_ = true;
+    if (settingsLock(pdMS_TO_TICKS(100))) {
+      gSettings.staticIp = editIp_;
+      gSettings.useStaticIp = true;
+      gSettings.gateway = IPAddress(editIp_[0], editIp_[1], editIp_[2], 1);
+      gStore.save(gSettings);
+      settingsUnlock();
+    }
+    NetRequest req;
+    req.type = NetReqType::ApplyStaticIp;
+    req.staticIp = editIp_;
+    postNetRequest(req);
     showMessage("Checking IP...");
   }
 }
 
-void DisplayUi::handleTimezone(int8_t rot, bool click, AppSettings& settings, SettingsStore& store) {
+void DisplayUi::handleTimezone(int8_t rot, bool click) {
+  if (!settingsLock(pdMS_TO_TICKS(50))) {
+    return;
+  }
   if (rot != 0) {
-    int v = settings.timezoneHours + rot;
+    int v = gSettings.timezoneHours + rot;
     if (v < -12) {
       v = 14;
     }
     if (v > 14) {
       v = -12;
     }
-    settings.timezoneHours = static_cast<int8_t>(v);
+    gSettings.timezoneHours = static_cast<int8_t>(v);
   }
   if (click) {
-    store.save(settings);
+    gStore.save(gSettings);
+    settingsUnlock();
     showMessage("TZ saved");
+    return;
   }
+  settingsUnlock();
 }

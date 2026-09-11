@@ -10,7 +10,8 @@
 4. **手动静态 IP**：编码器逐字节编辑；保存时通过 **ARP 探测**检测局域网是否已有相同 IP
 5. **编码器配网**：扫描附近 WiFi → 选择 SSID → 编码器输入密码 → 连接
 6. **网页配网**：开启 SoftAP（`NTP-Setup-XXXX` / 密码 `12345678`），浏览器选择 WiFi 并输入密码
-7. **网页状态**：STA 连上后访问 `http://<设备IP>/` 查看 NTP/GPS/PPS；`/status` 为 JSON；`/setup` 仍可改 WiFi
+7. **网页状态**：STA 连上后访问 `http://<设备IP>/` 查看 NTP/GPS/PPS（JS 每 2 秒轮询 `/status`，无需整页刷新）；`/setup` 仍可改 WiFi
+8. **FreeRTOS 三任务**：`task-time`(5) 独占 GNSS/NTP，`task-net`(2) 管 WiFi/网页，`task-ui`(1) 管 OLED/编码器/LED；PPS 计数对齐避免 NMEA 迟到导致的整秒跳变
 
 ## 硬件连接
 

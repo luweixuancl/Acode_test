@@ -6,13 +6,10 @@
 #include <lwip/ip4_addr.h>
 #include <lwip/netif.h>
 
-void WifiManager::begin(const AppSettings& settings) {
+void WifiManager::begin() {
   WiFi.persistent(false);
   WiFi.mode(WIFI_STA);
   WiFi.setHostname("esp32c3-ntp");
-  if (settings.wifiSsid.length() > 0) {
-    connectSta(settings);
-  }
 }
 
 bool WifiManager::connectSta(const AppSettings& settings) {
@@ -85,7 +82,6 @@ std::vector<WifiNetwork> WifiManager::scanNetworks() {
 }
 
 bool WifiManager::pingProbe(const IPAddress& ip) {
-  // Lightweight ARP probe via lwIP: request MAC for IP; if found, conflict.
   ip4_addr_t addr;
   IP4_ADDR(&addr, ip[0], ip[1], ip[2], ip[3]);
 
@@ -94,7 +90,6 @@ bool WifiManager::pingProbe(const IPAddress& ip) {
     return false;
   }
 
-  // Drop any existing ARP entry then request
   etharp_cleanup_netif(nif);
   err_t err = etharp_request(nif, &addr);
   if (err != ERR_OK) {
@@ -107,7 +102,7 @@ bool WifiManager::pingProbe(const IPAddress& ip) {
     struct eth_addr* eth_ret = nullptr;
     const ip4_addr_t* ip_ret = nullptr;
     if (etharp_find_addr(nif, &addr, &eth_ret, &ip_ret) >= 0) {
-      return true;  // someone answered ARP
+      return true;
     }
   }
   return false;
@@ -115,10 +110,8 @@ bool WifiManager::pingProbe(const IPAddress& ip) {
 
 bool WifiManager::detectIpConflict(const IPAddress& ip) {
   if (WiFi.status() != WL_CONNECTED) {
-    // Need to be on the LAN to probe; treat as unknown/no conflict.
     return false;
   }
-  // Do not conflict with ourselves
   if (ip == WiFi.localIP()) {
     return false;
   }
@@ -132,6 +125,5 @@ bool WifiManager::applyStaticIp(const AppSettings& settings) {
   if (detectIpConflict(settings.staticIp)) {
     return false;
   }
-  // Reconnect with static config
   return connectSta(settings);
 }

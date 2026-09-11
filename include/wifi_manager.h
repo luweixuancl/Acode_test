@@ -14,7 +14,8 @@ struct WifiNetwork {
 
 class WifiManager {
  public:
-  void begin(const AppSettings& settings);
+  // Init radio only — do not block on STA connect (net task connects).
+  void begin();
   bool connectSta(const AppSettings& settings);
   void startSetupAp();
   void stopAp();
@@ -23,7 +24,6 @@ class WifiManager {
   String macAddress() const;
 
   std::vector<WifiNetwork> scanNetworks();
-  // Returns true if another host already uses this IPv4 on the LAN.
   bool detectIpConflict(const IPAddress& ip);
   bool applyStaticIp(const AppSettings& settings);
 

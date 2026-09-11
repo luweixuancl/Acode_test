@@ -10,8 +10,7 @@ class NtpServer;
 
 class WebPortal {
  public:
-  void begin(WifiManager* wifi, SettingsStore* store, AppSettings* settings, GpsService* gps,
-             NtpServer* ntp);
+  void begin(WifiManager* wifi, GpsService* gps, NtpServer* ntp);
   void loop();
   bool consumeConnectRequest(String& ssid, String& pass);
 
@@ -26,8 +25,6 @@ class WebPortal {
 
   WebServer server_{80};
   WifiManager* wifi_ = nullptr;
-  SettingsStore* store_ = nullptr;
-  AppSettings* settings_ = nullptr;
   GpsService* gps_ = nullptr;
   NtpServer* ntp_ = nullptr;
   bool pendingConnect_ = false;
