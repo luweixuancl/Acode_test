@@ -77,6 +77,8 @@ class WifiManager {
   void setAutoReconnect(bool enabled) { autoReconnect_ = enabled; }
   bool autoReconnectEnabled() const { return autoReconnect_; }
   void cancelAutoReconnect();
+  // Schedule retries with saved credentials (boot fail / link loss).
+  void armReconnect(const AppSettings& settings, uint32_t firstDelayMs = 0);
   // Call from task-net when Idle: may start a reconnect beginConnect.
   bool pollAutoReconnect(AppSettings* outSettings);
   // True once if STA dropped while we considered ourselves connected.
@@ -99,6 +101,7 @@ class WifiManager {
 
   WifiConnectState connectState_ = WifiConnectState::Idle;
   uint32_t connectDeadlineMs_ = 0;
+  uint32_t lastBeginMs_ = 0;
   bool expectLink_ = false;
 
   WifiScanState scanState_ = WifiScanState::Idle;

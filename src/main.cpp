@@ -83,17 +83,23 @@ static void finishConnect(WifiConnectState st) {
     // STA is up — SoftAP must go away (was escape hatch only).
     gWifi.stopAp();
     gIpc.setupAp = false;
+    gBootNeedApIfFail = false;
   } else if (fromAuto) {
     // Backoff retry continues inside WifiManager; SoftAP only on give-up.
     postUiText("WiFi retry...");
   } else {
     postUiText("WiFi failed");
-    if (gBootNeedApIfFail) {
+    // Boot: do not open SoftAP on the first 201 — schedule reconnect instead.
+    if (gBootNeedApIfFail && !gPendingSta.wifiSsid.isEmpty()) {
+      gWifi.armReconnect(gPendingSta, WIFI_RECONNECT_BACKOFF_1_MS);
+      Serial.println("[wifi] boot join failed → scheduled reconnect (SoftAP after give-up)");
+      postUiText("WiFi retry...");
+    } else if (gBootNeedApIfFail) {
       openSetupApIfNeeded("AP setup mode");
+      gBootNeedApIfFail = false;
     }
   }
   gStopApOnConnectOk = false;
-  gBootNeedApIfFail = false;
 }
 
 static void handleConnect(const char* ssid, const char* pass) {
@@ -190,7 +196,10 @@ static void pollDisconnectAndReconnect() {
   }
 
   if (gWifi.consumeReconnectGiveUp()) {
-    openSetupApIfNeeded("AP setup mode");
+    if (gBootNeedApIfFail || !gIpc.setupAp) {
+      openSetupApIfNeeded("AP setup mode");
+      gBootNeedApIfFail = false;
+    }
   }
 
   if (gNetWork != NetWork::Idle) {

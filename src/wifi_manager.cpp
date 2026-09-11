@@ -88,6 +88,19 @@ void WifiManager::cancelAutoReconnect() {
   reconnectWindowStartMs_ = 0;
 }
 
+void WifiManager::armReconnect(const AppSettings& settings, uint32_t firstDelayMs) {
+  if (settings.wifiSsid.isEmpty()) {
+    return;
+  }
+  reconnectSettings_ = settings;
+  reconnectArmed_ = true;
+  reconnectAttempt_ = 0;
+  reconnectWindowStartMs_ = millis();
+  reconnectNextMs_ = millis() + firstDelayMs;
+  Serial.printf("[wifi] reconnect armed ssid=\"%s\" delay=%ums\n", settings.wifiSsid.c_str(),
+                static_cast<unsigned>(firstDelayMs));
+}
+
 bool WifiManager::consumeReconnectGiveUp() {
   if (!reconnectGaveUp_) {
     return false;
@@ -121,8 +134,15 @@ bool WifiManager::beginConnect(const AppSettings& settings) {
     WiFi.mode(WIFI_AP_STA);
   } else {
     WiFi.disconnect(false);
+    delay(50);
     WiFi.mode(WIFI_STA);
+    delay(50);
   }
+  WiFi.setSleep(false);
+#if defined(WIFI_ALL_CHANNEL_SCAN)
+  WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
+  WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
+#endif
   if (settings.useStaticIp) {
     if (!WiFi.config(settings.staticIp, settings.gateway, settings.subnet, settings.dns)) {
       Serial.println("WiFi.config failed");
@@ -131,11 +151,12 @@ bool WifiManager::beginConnect(const AppSettings& settings) {
     WiFi.config(INADDR_NONE, INADDR_NONE, INADDR_NONE);
   }
 
+  Serial.printf("WiFi connecting ssid=\"%s\"\n", settings.wifiSsid.c_str());
   WiFi.begin(settings.wifiSsid.c_str(), settings.wifiPass.c_str());
   connectDeadlineMs_ = millis() + WIFI_CONNECT_TIMEOUT_MS;
+  lastBeginMs_ = millis();
   connectState_ = WifiConnectState::Connecting;
   expectLink_ = true;
-  Serial.print("WiFi connecting");
   return true;
 }
 
@@ -153,6 +174,26 @@ WifiConnectState WifiManager::pollConnect() {
   }
 
   if (takeEventBit(WifiEvtBits::Disc)) {
+    // Cold boot often gets NO_AP_FOUND (201) before the first full scan finishes.
+    // Keep trying until the connect deadline instead of aborting into SoftAP.
+    if (lastDiscReason_ == 201 || lastDiscReason_ == 200) {
+      if (static_cast<int32_t>(millis() - connectDeadlineMs_) >= 0) {
+        connectState_ = WifiConnectState::Failed;
+        expectLink_ = false;
+        Serial.println();
+        Serial.printf("WiFi connect failed (no AP, reason=%u)\n", lastDiscReason_);
+        return connectState_;
+      }
+      if (static_cast<int32_t>(millis() - lastBeginMs_) >= static_cast<int32_t>(WIFI_NO_AP_REBEGIN_MS)) {
+        Serial.printf("\n[wifi] no AP yet (reason=%u) — re-begin\n", lastDiscReason_);
+        WiFi.disconnect(false);
+        delay(20);
+        WiFi.begin(reconnectSettings_.wifiSsid.c_str(), reconnectSettings_.wifiPass.c_str());
+        lastBeginMs_ = millis();
+      }
+      return WifiConnectState::Connecting;
+    }
+
     connectState_ = WifiConnectState::Failed;
     expectLink_ = false;
     Serial.println();
@@ -175,6 +216,17 @@ WifiConnectState WifiManager::pollConnect() {
     Serial.println();
     Serial.println("WiFi connect timeout");
     return connectState_;
+  }
+
+  // Periodic re-begin even if Disc bit was coalesced.
+  if (!reconnectSettings_.wifiSsid.isEmpty() &&
+      static_cast<int32_t>(millis() - lastBeginMs_) >= static_cast<int32_t>(WIFI_NO_AP_REBEGIN_MS) &&
+      WiFi.status() != WL_CONNECTED) {
+    Serial.println("\n[wifi] still joining — re-begin");
+    WiFi.disconnect(false);
+    delay(20);
+    WiFi.begin(reconnectSettings_.wifiSsid.c_str(), reconnectSettings_.wifiPass.c_str());
+    lastBeginMs_ = millis();
   }
 
   return WifiConnectState::Connecting;

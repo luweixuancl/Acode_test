@@ -8,6 +8,11 @@ AppSettings SettingsStore::load() const {
   AppSettings s;
   s.wifiSsid = prefs_.getString("ssid", "");
   s.wifiPass = prefs_.getString("pass", "");
+  // Repair corrupt creds from older Web savePolicy bug (JSON null → "null").
+  if (s.wifiSsid == "null" || s.wifiSsid == "undefined") {
+    s.wifiSsid = "";
+    s.wifiPass = "";
+  }
   s.useStaticIp = prefs_.getBool("static", false);
   s.staticIp.fromString(prefs_.getString("ip", "192.168.1.50"));
   s.gateway.fromString(prefs_.getString("gw", "192.168.1.1"));

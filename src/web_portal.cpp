@@ -349,24 +349,32 @@ void WebPortal::handleSave() {
     }
   }
 
-  pendingSsid_ = doc["ssid"].as<String>();
-  pendingPass_ = doc["pass"].as<String>();
-  if (!pendingSsid_.isEmpty()) {
-    AppSettings copy;
-    bool locked = false;
-    if (settingsLock(pdMS_TO_TICKS(200))) {
-      gSettings.wifiSsid = pendingSsid_;
-      gSettings.wifiPass = pendingPass_;
-      copy = gSettings;
-      settingsUnlock();
-      locked = true;
+  // Only touch WiFi creds when ssid is a real JSON string (not missing/null).
+  // ArduinoJson as<String>() on null yields the literal "null" which is NOT empty —
+  // that used to wipe NVS SSID when saving anomaly policy alone.
+  if (doc["ssid"].is<const char*>()) {
+    pendingSsid_ = doc["ssid"].as<const char*>();
+    pendingPass_ = doc["pass"].is<const char*>() ? String(doc["pass"].as<const char*>()) : String();
+    if (pendingSsid_ == "null" || pendingSsid_ == "undefined") {
+      pendingSsid_ = "";
     }
-    if (locked) {
-      gStore.save(copy);
+    if (!pendingSsid_.isEmpty()) {
+      AppSettings copy;
+      bool locked = false;
+      if (settingsLock(pdMS_TO_TICKS(200))) {
+        gSettings.wifiSsid = pendingSsid_;
+        gSettings.wifiPass = pendingPass_;
+        copy = gSettings;
+        settingsUnlock();
+        locked = true;
+      }
+      if (locked) {
+        gStore.save(copy);
+      }
+      pendingConnect_ = true;
+      server_.send(200, "text/plain", "Saved. Connecting...");
+      return;
     }
-    pendingConnect_ = true;
-    server_.send(200, "text/plain", "Saved. Connecting...");
-    return;
   }
 
   if (savedPolicy) {

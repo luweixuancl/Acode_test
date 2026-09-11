@@ -42,6 +42,7 @@
 // UI / timing
 #define DISPLAY_REFRESH_MS   250
 #define WIFI_CONNECT_TIMEOUT_MS 20000
+#define WIFI_NO_AP_REBEGIN_MS    3000  // re-WiFi.begin while Connecting after reason 201
 #define IP_CONFLICT_TIMEOUT_MS   800
 // Auto-reconnect backoff (ms): attempt 1 immediate, then 2s/5s/10s/30s...
 #define WIFI_RECONNECT_MAX_ATTEMPTS    5
@@ -51,6 +52,8 @@
 #define WIFI_RECONNECT_BACKOFF_2_MS   5000
 #define WIFI_RECONNECT_BACKOFF_3_MS  10000
 #define WIFI_RECONNECT_BACKOFF_4_MS  30000
+// Boot: first STA fail arms reconnect; SoftAP only after give-up (not after 1x 201).
+#define WIFI_BOOT_SOFTAP_AFTER_GIVEUP 1
 #define GPS_NMEA_MAX_BYTES_PER_LOOP 256
 #define NTP_MAX_PACKETS_PER_LOOP      8
 // TinyGPSPlus isValid() stays true after last sentence; require fresh age + sats>0.
