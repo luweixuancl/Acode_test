@@ -17,6 +17,7 @@ enum class UiMode : uint8_t {
   WifiPassword,
   SetIp,
   SetTimezone,
+  SetAnomaly,
   WebSetupHint,
   Message,
 };
@@ -27,6 +28,7 @@ enum class MenuItem : uint8_t {
   SetStaticIp,
   UseDhcp,
   Timezone,
+  AnomalyMode,
   Restart,
   Count
 };
@@ -34,7 +36,6 @@ enum class MenuItem : uint8_t {
 class DisplayUi {
  public:
   void begin();
-  // Call only from task-ui. Reads GPS via snapshot; posts NetRequests for WiFi.
   void loop(EncoderInput& enc, GpsService& gps, WifiManager& wifi);
 
   void showMessage(const String& msg);
@@ -47,6 +48,7 @@ class DisplayUi {
   void drawPassword();
   void drawSetIp();
   void drawTimezone(const AppSettings& settings);
+  void drawAnomaly(const AppSettings& settings);
   void drawMessage();
   void drawWebHint();
 
@@ -56,6 +58,7 @@ class DisplayUi {
   void handlePassword(int8_t rot, bool click, bool longPress);
   void handleSetIp(int8_t rot, bool click, bool longPress);
   void handleTimezone(int8_t rot, bool click);
+  void handleAnomaly(int8_t rot, bool click, bool longPress);
   void drainUiMessages();
 
   Adafruit_SSD1306 display_{OLED_WIDTH, OLED_HEIGHT, &Wire, -1};
@@ -68,6 +71,7 @@ class DisplayUi {
   uint8_t pwdCursor_ = 0;
   uint8_t ipOctet_ = 0;
   IPAddress editIp_;
+  AnomalyPolicy editPolicy_ = AnomalyPolicy::Refuse;
   String pendingSsid_;
   String message_;
   uint32_t messageUntil_ = 0;

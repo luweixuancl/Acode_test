@@ -21,7 +21,6 @@ class WebPortal {
   void handleSave();
   void handleStatus();
   String buildPage(const String& title, const String& body, bool refresh = false) const;
-  String formatUtc(uint32_t epoch, int8_t tzHours) const;
 
   WebServer server_{80};
   WifiManager* wifi_ = nullptr;

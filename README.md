@@ -9,9 +9,10 @@
 3. **旋转编码器菜单**：扫描 WiFi、网页配网、静态 IP、DHCP、时区、重启
 4. **手动静态 IP**：编码器逐字节编辑；保存时通过 **ARP 探测**检测局域网是否已有相同 IP
 5. **编码器配网**：扫描附近 WiFi → 选择 SSID → 编码器输入密码 → 连接
-6. **网页配网**：开启 SoftAP（`NTP-Setup-XXXX` / 密码 `12345678`），浏览器选择 WiFi 并输入密码
-7. **网页状态**：STA 连上后访问 `http://<设备IP>/` 查看 NTP/GPS/PPS（JS 每 2 秒轮询 `/status`，无需整页刷新）；`/setup` 仍可改 WiFi
+6. **网页配网**：开启 SoftAP（`NTP-Setup-XXXX` / 密码 `12345678`，**仅 2.4 GHz**），浏览器选择 WiFi 并输入密码。手机/电脑若连在 5 GHz 上可能扫不到该热点，请在 WLAN 列表中看 2.4 GHz 网络，或先断开当前 WiFi 再扫。
+7. **网页状态**：STA 连上后访问 `http://<设备IP>/` 查看 NTP/GPS/PPS（JS 按 1 Hz 轮询 `/status`，无需整页刷新）；`/setup` 仍可改 WiFi
 8. **FreeRTOS 三任务**：`task-time`(5) 独占 GNSS/NTP，`task-net`(2) 管 WiFi/网页，`task-ui`(1) 管 OLED/编码器/LED；PPS 计数对齐避免 NMEA 迟到导致的整秒跳变
+9. **WiFi 事件 + 自动重连**：`GOT_IP`/`DISC`/`SCAN_DONE` 驱动状态机；掉线后退避重连（默认开，NVS `arec`）；多次失败后开 SoftAP 逃生。本板为 **C3 单核**，不做双核拆分（详见 `docs/wifi_event_fsm.md`）
 
 ## 硬件连接
 
@@ -42,10 +43,14 @@
 |-----|------|------|
 | D4 | 快闪（约 4 Hz） | 配网 AP 模式 |
 | D4 | 慢闪（约 1 Hz） | 固件运行中，STA 未连接 |
-| D4 | 常亮 | WiFi STA 已连接 |
+| D4 | 心跳（约 900 ms 亮 / 100 ms 灭） | WiFi STA 已连接且固件存活 |
 | D5 | 灭 | 无 GNSS 信号 |
-| D5 | 闪烁 | 已搜星或已定位，等待稳定 PPS |
-| D5 | 常亮 | GPS 锁定且 PPS 正常（可作为 Stratum-1 NTP） |
+| D5 | 慢闪 | 已搜星或 ACQ，等待稳定锁定 |
+| D5 | 快闪 | Holdover 守时 |
+| D5 | 心跳（与 D4 反相短灭） | GPS 锁定（LCK/DEG）且可授时 |
+| D4+D5 | 交替狂闪（约 5 Hz） | 某 FreeRTOS 任务超过约 3 s 未响应 |
+
+健康态用「短灭心跳」而非常亮：若灯僵死在常亮/常灭且不再闪断，多半已死机（UI 也停了）。
 
 ### DX-GP22 说明
 
@@ -66,9 +71,14 @@
 - **Set Static IP**：编辑四个字节；长按保存并做 IP 冲突检测
 - **Use DHCP**：改回自动获取 IP
 - **Timezone**：设置 UTC 偏移（默认 +8）
+- **Anomaly Mode**：GPS 异常策略 — Refuse（拒授时）/ Holdover 30s / Holdover 300s（写入 NVS）
 - **Restart**：重启
 
+主界面显示时钟状态缩写（ACQ/LCK/DEG/HLD/UNS）与 residual；Web `/` 与 `/status` 同步展示。`/setup` 也可改异常策略。
+
 长按编码器：多数界面返回上一级。
+
+D5（GNSS）：LCK/DEG 心跳；Holdover 快闪；ACQ 慢闪；UNS/无星灭。D4 STA 为心跳。双灯交替狂闪表示任务卡死告警。
 
 ## 编译与烧录
 
@@ -87,12 +97,19 @@ ntpdate -q <设备IP>
 chronyc sources
 ```
 
-GPS 锁定且 PPS 正常时，应答为 **stratum 1**，Reference ID 为 `GPSS`。
+GPS 锁定且 PPS 正常时，应答为 **stratum 1**，Reference ID 为 `GPSS`。未同步时 LI=3 / stratum 16 / RefID `INIT`；Holdover 时 LI=1。
+
+Windows 下若工程路径含非 ASCII 字符导致链接失败，可用 ASCII junction（如 `C:\acode_leds`）再 `pio run`。
 
 ## 目录结构
 
 ```
 include/     配置与头文件
 src/         固件源码
+docs/        设计方案（如本地时钟与 GPS 检核）
 platformio.ini
 ```
+
+本地时钟 / GPS 交叉检核与异常策略已落地，见 [docs/local_clock_gps_check.md](docs/local_clock_gps_check.md)。
+
+WiFi 事件 FSM、自动重连与 C3 无双核说明见 [docs/wifi_event_fsm.md](docs/wifi_event_fsm.md)。

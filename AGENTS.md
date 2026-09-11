@@ -10,7 +10,7 @@ pio run -t upload
 pio device monitor
 ```
 
-Env in `platformio.ini`: `esp32-c3` (`esp32-c3-devkitm-1`, Arduino). Serial: 115200, USB CDC on boot (`ARDUINO_USB_CDC_ON_BOOT=1`).
+Env in `platformio.ini`: `esp32-c3` (`esp32-c3-devkitm-1`, Arduino). Serial: 115200, UART0 CH343 (`ARDUINO_USB_CDC_ON_BOOT=0`).
 
 Client check after GPS lock + PPS: `ntpdate -q <device-ip>` — expect stratum 1, refid `GPSS`.
 
@@ -19,14 +19,17 @@ Client check after GPS lock + PPS: `ntpdate -q <device-ip>` — expect stratum 1
 | Path | Role |
 |------|------|
 | `include/config.h` | Pins, baud, NTP port, AP prefix, timeouts |
-| `src/main.cpp` | Globals, `setup`/`loop`, WiFi connect + IP-conflict apply |
-| `gps_service` | NMEA UART + PPS ISR, UTC for NTP |
+| `src/main.cpp` | Globals, `setup`/`loop`, three FreeRTOS tasks |
+| `local_clock` | PPS-disciplined UTC, residual FSM, Holdover |
+| `gps_service` | NMEA UART + PPS ISR, owns LocalClock |
 | `ntp_server` | UDP/123, LI/stratum, timestamps |
-| `wifi_manager` | STA/AP, scan, ARP IP conflict |
+| `wifi_manager` | STA/AP, 事件驱动连接/扫描, 退避重连, ARP IP conflict |
 | `web_portal` | SoftAP portal on port 80 |
 | `encoder` / `display_ui` | KY-040 + OLED menu |
 | `status_leds` | D4 network, D5 GNSS/PPS |
 | `settings` | NVS namespace `ntp-srv` |
+| `docs/local_clock_gps_check.md` | LocalClock + AnomalyPolicy design (已实现) |
+| `docs/wifi_event_fsm.md` | WiFi 事件 FSM、重连、C3 无双核说明 |
 
 Headers in `include/`, implementations in `src/`. One class per pair.
 
@@ -38,19 +41,24 @@ Do not hardcode pins in `.cpp`; use `config.h` macros.
 
 ## Architecture
 
-- FreeRTOS three tasks (ESP32-C3 single core): `task-time` prio 5 (UART1/PPS/UDP 123), `task-net` prio 2 (WiFi/Web:80), `task-ui` prio 1 (OLED/encoder/LEDs). `loop()` deletes itself after spawn.
+- FreeRTOS three tasks (**ESP32-C3 single-core only** — no APP/PRO dual-core split on this board): `task-time` prio 5 (UART1/PPS/UDP 123), `task-net` prio 2 (WiFi/Web:80), `task-ui` prio 1 (OLED/encoder/LEDs). All pinned to core 0. `loop()` deletes itself after spawn. Dual-core pinning is a future ESP32-S3 roadmap item only; see `docs/wifi_event_fsm.md`.
 - PPS ISR notifies time via `vTaskNotifyGiveFromISR`; time also polls every 1ms.
 - Cross-task IPC in `app_ipc`: `NetRequest` / `UiMsg` queues + `gSettings` mutex. UI never blocks on WiFi scan/connect.
-- GPS `nowUtc()` uses PPS-count lag vs NMEA commit (`seconds = utcEpoch + lag`) to avoid -1s jump while RMC trails PPS. Commit only on new NMEA second; stall >3s → refuse time. RX buffer 2048.
-- NTP honest metadata: unsync → LI=3/stratum 16; PPS ready → precision -10; dispersion from `qualityMs`.
-- SoftAP `NTP-Setup-XXXX` / `12345678` when not on STA (or menu Web Setup). HTTP `/` status, `/setup` WiFi, `/status` JSON.
+- GPS owns `LocalClock`: PPS edges via `esp_timer`, ppm EMA, LocalUtc extrapolation; NMEA residual cross-check (warn 50 ms / fail 100 ms). States ACQ/LCK/DEG/HLD/UNS. `nowUtc()` serves NTP only from Locked/Degraded/Holdover.
+- AnomalyPolicy in NVS (`apol`/`ahold`): Refuse / HoldoverShort(30s) / HoldoverLong(300s); OLED Anomaly Mode + Web `/setup`.
+- NTP honest metadata: unsync → LI=3/stratum 16/refid `INIT`; Locked/Degraded LI=0; Holdover LI=1; sync only LCK/DEG/HLD; PPS ready → precision -10; dispersion from `qualityMs`.
+- SoftAP `NTP-Setup-XXXX` / `12345678` when not on STA (or menu Web Setup). HTTP `/` status, `/setup` WiFi+policy, `/status` JSON (`clock`/`residualMs`/`anomalyPolicy`).
+- `WifiManager`: `WiFi.onEvent` only sets flags/logs; `task-net` consumes GOT_IP/DISC/SCAN_DONE. Connect success prefers GOT_IP (fallback WL_CONNECTED+IP). STA drop → backoff auto-reconnect (`WIFI_RECONNECT_*`, NVS `arec` default on); give-up opens SoftAP. Scan results cached in `lastScan_` for OLED + `/scan`.
+- `task-net` polls STA connect / WiFi scan / ARP conflict without blocking; HTTP `handleClient` keeps running during join/scan.
+- Design: `docs/local_clock_gps_check.md`, `docs/wifi_event_fsm.md`.
+- Windows note: project path with non-ASCII may break `ld` map file; build via ASCII junction (e.g. `C:\acode_leds`) if link fails.
 
 ## Conventions
 
 - Arduino C++11-ish: `#pragma once`, classes with `begin()`/`loop()`, trailing underscore members.
-- ISRs (`IRAM_ATTR`): PPS and encoder A only. Keep them short; share state via `volatile`. Encoder rotate is consumed with `noInterrupts()`.
-- LEDs: HIGH = on. D4: AP ~4 Hz, no STA ~1 Hz, STA solid. D5: off / blink / solid as in README.
-- Settings persist with `Preferences` keys: `ssid`, `pass`, `static`, `ip`, `gw`, `mask`, `dns`, `tz`. Default timezone +8.
+- ISRs (`IRAM_ATTR`): PPS plus encoder A **and** B (CHANGE). Keep them short; share state via `volatile`. Encoder uses `esp_timer_get_time()` debounce (no `millis()` in ISR); rotate is consumed with `noInterrupts()`.
+- LEDs: HIGH = on. D4: AP ~4 Hz, no STA ~1 Hz, STA heartbeat (~900/100 ms). D5: off / ACQ blink / HLD fast blink / LCK·DEG heartbeat. Alternate panic blink if any task kick goes stale (~3 s).
+- Settings persist with `Preferences` keys: `ssid`, `pass`, `static`, `ip`, `gw`, `mask`, `dns`, `tz`, `apol`, `ahold`, `arec` (auto-reconnect, default true). Default timezone +8; anomaly Refuse.
 - Libs: ArduinoJson 7, Adafruit SSD1306/GFX, TinyGPSPlus — versions pinned in `platformio.ini`.
 
 ## Do not

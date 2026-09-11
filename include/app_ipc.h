@@ -46,6 +46,11 @@ struct AppIpc {
   std::vector<WifiNetwork> scanResults;
   bool scanReady = false;
   bool setupAp = false;
+
+  // Task liveness stamps (millis); StatusLeds panics if any go stale.
+  volatile uint32_t kickTimeMs = 0;
+  volatile uint32_t kickNetMs = 0;
+  volatile uint32_t kickUiMs = 0;
 };
 
 extern AppIpc gIpc;
@@ -57,3 +62,7 @@ bool settingsLock(TickType_t ticks = portMAX_DELAY);
 void settingsUnlock();
 bool postNetRequest(const NetRequest& req);
 bool postUiText(const char* text);
+
+inline void ipcKickTime() { gIpc.kickTimeMs = millis(); }
+inline void ipcKickNet() { gIpc.kickNetMs = millis(); }
+inline void ipcKickUi() { gIpc.kickUiMs = millis(); }

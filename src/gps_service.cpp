@@ -1,14 +1,22 @@
 #include "gps_service.h"
+#include <esp_timer.h>
 
+portMUX_TYPE GpsService::ppsMux_ = portMUX_INITIALIZER_UNLOCKED;
 volatile uint32_t GpsService::ppsMillis_ = 0;
 volatile uint32_t GpsService::ppsCount_ = 0;
+volatile uint64_t GpsService::ppsEdgeUs_ = 0;
 volatile bool GpsService::ppsFlag_ = false;
 TaskHandle_t GpsService::timeTask_ = nullptr;
 
 void IRAM_ATTR GpsService::onPpsIsr() {
-  ppsMillis_ = millis();
+  const uint64_t edgeUs = esp_timer_get_time();
+  const uint32_t nowMs = millis();
+  portENTER_CRITICAL_ISR(&ppsMux_);
+  ppsEdgeUs_ = edgeUs;
+  ppsMillis_ = nowMs;
   ppsCount_++;
   ppsFlag_ = true;
+  portEXIT_CRITICAL_ISR(&ppsMux_);
   BaseType_t woken = pdFALSE;
   if (timeTask_ != nullptr) {
     vTaskNotifyGiveFromISR(timeTask_, &woken);
@@ -19,30 +27,50 @@ void IRAM_ATTR GpsService::onPpsIsr() {
 }
 
 void GpsService::begin() {
+  localClock_.reset();
   pinMode(PIN_GPS_PPS, INPUT_PULLDOWN);
   gpsSerial_.setRxBufferSize(2048);
   gpsSerial_.begin(GPS_UART_BAUD, SERIAL_8N1, PIN_GPS_RX, PIN_GPS_TX);
   attachInterrupt(digitalPinToInterrupt(PIN_GPS_PPS), onPpsIsr, RISING);
-  Serial.printf("GPS UART%d RX=%d TX=%d baud=%d buf=2048\n", GPS_UART_NUM, PIN_GPS_RX,
-                PIN_GPS_TX, GPS_UART_BAUD);
+  Serial.printf("GPS UART%d RX=%d TX=%d baud=%d buf=2048 local-clock=on\n", GPS_UART_NUM,
+                PIN_GPS_RX, PIN_GPS_TX, GPS_UART_BAUD);
 }
 
-void GpsService::loop() {
+void GpsService::loop(AnomalyPolicy policy, uint16_t holdoverSec) {
   parseNmea();
 
+  bool gotPps = false;
+  uint64_t edgeUs = 0;
+  uint32_t count = 0;
+  portENTER_CRITICAL(&ppsMux_);
   if (ppsFlag_) {
     ppsFlag_ = false;
+    edgeUs = ppsEdgeUs_;
+    count = ppsCount_;
+    gotPps = true;
+  }
+  portEXIT_CRITICAL(&ppsMux_);
+  if (gotPps) {
     ppsSeen_ = true;
+    localClock_.onPpsEdge(edgeUs, count);
   }
 
   GpsStatus work;
   work.satellites = gps_.satellites.isValid() ? gps_.satellites.value() : 0;
-  work.validFix = gps_.location.isValid() && gps_.date.isValid() && gps_.time.isValid();
-  if (gps_.location.isValid()) {
+  // isValid() alone is sticky after first fix; require recent updates and sats>0 so
+  // antenna-loss (0 sats / stale NMEA) clears "GPS 锁定" on OLED/Web.
+  const bool locFresh =
+      gps_.location.isValid() && gps_.location.age() <= GPS_FIX_MAX_AGE_MS;
+  const bool timeFresh = gps_.date.isValid() && gps_.time.isValid() &&
+                         gps_.time.age() <= GPS_FIX_MAX_AGE_MS;
+  const bool satsOk = gps_.satellites.isValid() &&
+                      gps_.satellites.age() <= GPS_FIX_MAX_AGE_MS && work.satellites > 0;
+  work.validFix = locFresh && timeFresh && satsOk;
+  if (locFresh) {
     work.lat = gps_.location.lat();
     work.lon = gps_.location.lng();
   }
-  if (gps_.hdop.isValid()) {
+  if (gps_.hdop.isValid() && gps_.hdop.age() <= GPS_FIX_MAX_AGE_MS) {
     work.hdop = gps_.hdop.hdop();
   }
   work.ppsSeen = ppsSeen_;
@@ -68,18 +96,25 @@ void GpsService::loop() {
                                                  t.minute() * 60L + t.second());
     work.ageMs = gps_.time.age();
     if (epoch != lastCommittedSecond_) {
-      commitNmeaTime(epoch);
+      commitNmeaTime(epoch, policy, holdoverSec);
       lastCommittedSecond_ = epoch;
     }
   } else {
     work.ageMs = 0xFFFFFFFF;
   }
 
+  const bool nmeaFresh = haveCommit_ && (millis() - commitMs_) <= 3000;
+  localClock_.tick(nmeaFresh, work.ppsFresh, policy, holdoverSec);
+
   work.qualityMs = qualityMs();
   uint32_t sec = 0;
   uint32_t frac = 0;
   work.timeValid = nowUtc(sec, frac);
   work.utcEpoch = work.timeValid ? sec : commitEpoch_;
+  work.clockState = localClock_.state();
+  work.residualMs = localClock_.residualMs();
+  work.freqPpm = localClock_.freqPpm();
+  work.holdoverMs = localClock_.holdoverElapsedMs();
 
   publishStatus(work);
 
@@ -87,20 +122,23 @@ void GpsService::loop() {
   const uint32_t now = millis();
   if (now - lastDebugMs_ >= 1000) {
     lastDebugMs_ = now;
-    Serial.printf("GPS fix=%d sat=%u pps=%u age=%lu utc=%lu q=%lu valid=%d\n",
-                  work.validFix ? 1 : 0, work.satellites, work.ppsCount,
-                  static_cast<unsigned long>(work.ageMs),
-                  static_cast<unsigned long>(work.utcEpoch),
-                  static_cast<unsigned long>(work.qualityMs), work.timeValid ? 1 : 0);
+    Serial.printf(
+        "GPS fix=%d sat=%u pps=%u utc=%lu valid=%d clk=%s r=%ld ppm=%.1f q=%lu hold=%lu\n",
+        work.validFix ? 1 : 0, work.satellites, work.ppsCount,
+        static_cast<unsigned long>(work.utcEpoch), work.timeValid ? 1 : 0,
+        clockStateLabel(work.clockState), static_cast<long>(work.residualMs),
+        static_cast<double>(work.freqPpm), static_cast<unsigned long>(work.qualityMs),
+        static_cast<unsigned long>(work.holdoverMs));
   }
 #endif
 }
 
-void GpsService::commitNmeaTime(uint32_t epochSec) {
+void GpsService::commitNmeaTime(uint32_t epochSec, AnomalyPolicy policy, uint16_t holdoverSec) {
   commitEpoch_ = epochSec;
   commitPpsCount_ = ppsCount_;
   commitMs_ = millis();
   haveCommit_ = true;
+  localClock_.onNmeaCommit(epochSec, commitPpsCount_, policy, holdoverSec);
 }
 
 void GpsService::publishStatus(const GpsStatus& work) {
@@ -110,8 +148,13 @@ void GpsService::publishStatus(const GpsStatus& work) {
 }
 
 void GpsService::parseNmea() {
-  while (gpsSerial_.available() > 0) {
-    gps_.encode(static_cast<char>(gpsSerial_.read()));
+  int budget = GPS_NMEA_MAX_BYTES_PER_LOOP;
+  while (budget-- > 0 && gpsSerial_.available() > 0) {
+    const char c = static_cast<char>(gpsSerial_.read());
+#if GPS_DEBUG_NMEA
+    Serial.write(c);
+#endif
+    gps_.encode(c);
   }
 }
 
@@ -131,48 +174,10 @@ bool GpsService::ppsFresh() const {
 }
 
 uint32_t GpsService::qualityMs() const {
-  if (!haveCommit_) {
-    return 0xFFFFFFFF;
-  }
-  const uint32_t age = millis() - commitMs_;
-  if (age > 3000) {
-    return 0xFFFFFFFF;
-  }
-  if (ppsFresh()) {
-    const uint32_t sincePps = millis() - ppsMillis_;
-    return sincePps < 1000 ? (sincePps + 5) : 50;
-  }
-  return 200 + age;
+  return localClock_.qualityMs();
 }
 
 bool GpsService::nowUtc(uint32_t& seconds, uint32_t& fraction) const {
-  if (!haveCommit_ || commitEpoch_ == 0) {
-    return false;
-  }
-  if ((millis() - commitMs_) > 3000) {
-    return false;
-  }
-
-  const uint32_t ppsNow = ppsCount_;
-  const uint32_t lag = ppsNow - commitPpsCount_;
-  if (lag > 60) {
-    return false;
-  }
-
-  uint32_t baseSec = commitEpoch_ + lag;
-  const uint32_t ppsMs = ppsMillis_;
-  const uint32_t nowMs = millis();
-  const uint32_t sincePps = nowMs - ppsMs;
-
-  if (ppsSeen_ && sincePps < 1500) {
-    seconds = baseSec;
-    fraction = static_cast<uint32_t>((static_cast<uint64_t>(sincePps % 1000) << 32) / 1000ULL);
-    if (sincePps >= 1000) {
-      seconds += sincePps / 1000;
-    }
-  } else {
-    seconds = commitEpoch_;
-    fraction = 0;
-  }
-  return true;
+  // NTP honesty: only LocalClock Locked/Degraded/Holdover may serve time.
+  return localClock_.nowUtc(seconds, fraction);
 }

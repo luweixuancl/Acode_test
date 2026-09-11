@@ -11,6 +11,8 @@ class StatusLeds {
 
  private:
   static void writeBlink(uint8_t pin, uint32_t nowMs, uint32_t halfPeriodMs);
+  static void writeHeartbeat(uint8_t pin, uint32_t nowMs);
+  static bool tasksStale(uint32_t nowMs);
 
   uint32_t lastUpdateMs_ = 0;
 };

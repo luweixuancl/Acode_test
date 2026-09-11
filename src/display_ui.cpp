@@ -9,6 +9,7 @@ static const char* MENU_LABELS[] = {
     "Set Static IP",
     "Use DHCP",
     "Timezone",
+    "Anomaly Mode",
     "Restart",
 };
 
@@ -91,6 +92,9 @@ void DisplayUi::loop(EncoderInput& enc, GpsService& gps, WifiManager& wifi) {
     case UiMode::SetTimezone:
       handleTimezone(rot, click);
       break;
+    case UiMode::SetAnomaly:
+      handleAnomaly(rot, click, longPress);
+      break;
     case UiMode::WebSetupHint:
       if (click || longPress) {
         mode_ = UiMode::Home;
@@ -138,6 +142,9 @@ void DisplayUi::loop(EncoderInput& enc, GpsService& gps, WifiManager& wifi) {
     case UiMode::SetTimezone:
       drawTimezone(settings);
       break;
+    case UiMode::SetAnomaly:
+      drawAnomaly(settings);
+      break;
     case UiMode::WebSetupHint:
       drawWebHint();
       break;
@@ -172,33 +179,42 @@ void DisplayUi::drawHome(const GpsStatus& st, const WifiManager& wifi, const App
   }
 
   display_.setCursor(0, 36);
-  display_.print("PPS ");
-  display_.print(st.ppsFresh ? "OK" : "--");
-  display_.print("  TZ");
-  if (settings.timezoneHours >= 0) {
-    display_.print("+");
-  }
-  display_.print(settings.timezoneHours);
+  display_.print(clockStateLabel(st.clockState));
+  display_.print(" R");
+  display_.print(st.residualMs);
+  display_.print(" A:");
+  display_.print(anomalyPolicyShortLabel(settings.anomalyPolicy));
 
   display_.setCursor(0, 48);
-  if (st.timeValid && st.utcEpoch > 0) {
+  if (st.utcEpoch > 0) {
     time_t local = static_cast<time_t>(st.utcEpoch) + settings.timezoneHours * 3600L;
-    struct tm* tm = gmtime(&local);
+    struct tm tmv = {};
+    gmtime_r(&local, &tmv);
     char buf[20];
-    snprintf(buf, sizeof(buf), "%02d:%02d:%02d", tm->tm_hour, tm->tm_min, tm->tm_sec);
+    snprintf(buf, sizeof(buf), "%02d:%02d:%02d", tmv.tm_hour, tmv.tm_min, tmv.tm_sec);
     display_.print(buf);
   } else {
     display_.print("--:--:--");
   }
   display_.setCursor(72, 48);
-  display_.print("Click=Menu");
+  display_.print(st.timeValid ? "SYNC" : "WAIT");
 }
 
 void DisplayUi::drawMenu() {
   display_.setCursor(0, 0);
   display_.println("Menu  long=Back");
-  for (uint8_t i = 0; i < static_cast<uint8_t>(MenuItem::Count); ++i) {
-    display_.setCursor(0, 12 + i * 10);
+  const uint8_t count = static_cast<uint8_t>(MenuItem::Count);
+  const uint8_t visible = 5;
+  uint8_t start = 0;
+  if (menuIndex_ >= visible) {
+    start = menuIndex_ - visible + 1;
+  }
+  for (uint8_t row = 0; row < visible; ++row) {
+    const uint8_t i = static_cast<uint8_t>(start + row);
+    if (i >= count) {
+      break;
+    }
+    display_.setCursor(0, 12 + row * 10);
     display_.print(i == menuIndex_ ? ">" : " ");
     display_.print(MENU_LABELS[i]);
   }
@@ -293,6 +309,19 @@ void DisplayUi::drawTimezone(const AppSettings& settings) {
   display_.print("rot=chg click=save");
 }
 
+void DisplayUi::drawAnomaly(const AppSettings& settings) {
+  (void)settings;
+  display_.setCursor(0, 0);
+  display_.println("Anomaly Mode");
+  display_.setCursor(0, 16);
+  display_.print(">");
+  display_.println(anomalyPolicyMenuLabel(editPolicy_));
+  display_.setCursor(0, 40);
+  display_.println("rot=chg click=save");
+  display_.setCursor(0, 52);
+  display_.println("long=back");
+}
+
 void DisplayUi::drawMessage() {
   display_.setCursor(0, 20);
   display_.println(message_);
@@ -366,6 +395,13 @@ void DisplayUi::handleMenu(int8_t rot, bool click, bool longPress) {
     }
     case MenuItem::Timezone:
       mode_ = UiMode::SetTimezone;
+      break;
+    case MenuItem::AnomalyMode:
+      if (settingsLock(pdMS_TO_TICKS(50))) {
+        editPolicy_ = gSettings.anomalyPolicy;
+        settingsUnlock();
+      }
+      mode_ = UiMode::SetAnomaly;
       break;
     case MenuItem::Restart:
       ESP.restart();
@@ -447,12 +483,23 @@ void DisplayUi::handleSetIp(int8_t rot, bool click, bool longPress) {
     ipOctet_ = (ipOctet_ + 1) % 4;
   }
   if (longPress) {
+    AppSettings copy;
+    bool locked = false;
     if (settingsLock(pdMS_TO_TICKS(100))) {
       gSettings.staticIp = editIp_;
       gSettings.useStaticIp = true;
-      gSettings.gateway = IPAddress(editIp_[0], editIp_[1], editIp_[2], 1);
-      gStore.save(gSettings);
+      // Keep existing gateway when still on the same /24; otherwise default to .1.
+      IPAddress gw = gSettings.gateway;
+      if (gw[0] != editIp_[0] || gw[1] != editIp_[1] || gw[2] != editIp_[2]) {
+        gw = IPAddress(editIp_[0], editIp_[1], editIp_[2], 1);
+      }
+      gSettings.gateway = gw;
+      copy = gSettings;
       settingsUnlock();
+      locked = true;
+    }
+    if (locked) {
+      gStore.save(copy);
     }
     NetRequest req;
     req.type = NetReqType::ApplyStaticIp;
@@ -477,10 +524,46 @@ void DisplayUi::handleTimezone(int8_t rot, bool click) {
     gSettings.timezoneHours = static_cast<int8_t>(v);
   }
   if (click) {
-    gStore.save(gSettings);
+    AppSettings copy = gSettings;
     settingsUnlock();
+    gStore.save(copy);
     showMessage("TZ saved");
     return;
   }
   settingsUnlock();
+}
+
+void DisplayUi::handleAnomaly(int8_t rot, bool click, bool longPress) {
+  if (longPress) {
+    mode_ = UiMode::Home;
+    return;
+  }
+  if (rot != 0) {
+    int v = static_cast<int>(editPolicy_) + (rot > 0 ? 1 : -1);
+    if (v < 0) {
+      v = static_cast<int>(AnomalyPolicy::HoldoverLong);
+    }
+    if (v > static_cast<int>(AnomalyPolicy::HoldoverLong)) {
+      v = 0;
+    }
+    editPolicy_ = static_cast<AnomalyPolicy>(v);
+  }
+  if (click) {
+    AppSettings copy;
+    bool locked = false;
+    if (settingsLock(pdMS_TO_TICKS(100))) {
+      gSettings.anomalyPolicy = editPolicy_;
+      const uint16_t defHold = anomalyPolicyDefaultHoldoverSec(editPolicy_);
+      if (defHold > 0) {
+        gSettings.holdoverSec = defHold;
+      }
+      copy = gSettings;
+      settingsUnlock();
+      locked = true;
+    }
+    if (locked) {
+      gStore.save(copy);
+    }
+    showMessage(String("A:") + anomalyPolicyShortLabel(editPolicy_));
+  }
 }

@@ -17,8 +17,8 @@ class EncoderInput {
   static void IRAM_ATTR onEncIsr();
   void sampleButton();
 
-  static volatile int8_t rotateAccum_;
-  uint32_t lastBtnMs_ = 0;
+  static volatile int16_t rotateAccum_;
+  static volatile uint8_t abState_;  // bit1=A, bit0=B
   bool btnDown_ = false;
   bool clickPending_ = false;
   bool longPending_ = false;

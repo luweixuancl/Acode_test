@@ -29,6 +29,73 @@ TaskHandle_t gTaskTime = nullptr;
 TaskHandle_t gTaskNet = nullptr;
 TaskHandle_t gTaskUi = nullptr;
 
+enum class NetWork : uint8_t {
+  Idle = 0,
+  Connecting = 1,
+  Scanning = 2,
+  Probing = 3,
+};
+
+static NetWork gNetWork = NetWork::Idle;
+static AppSettings gPendingSta;
+static bool gStopApOnConnectOk = false;
+static bool gBootNeedApIfFail = true;
+static bool gConnectFromAutoReconnect = false;
+
+static bool startStaConnect(const AppSettings& settings, bool stopApOnOk) {
+  if (gWifi.isBusy() || gNetWork != NetWork::Idle) {
+    postUiText("WiFi busy");
+    return false;
+  }
+  if (!gWifi.beginConnect(settings)) {
+    postUiText("WiFi busy");
+    return false;
+  }
+  gPendingSta = settings;
+  gStopApOnConnectOk = stopApOnOk;
+  gConnectFromAutoReconnect = false;
+  gNetWork = NetWork::Connecting;
+  postUiText("WiFi joining...");
+  return true;
+}
+
+static void openSetupApIfNeeded(const char* uiMsg) {
+  if (gWifi.isStaConnected() || gIpc.setupAp) {
+    return;
+  }
+  gWifi.cancelAutoReconnect();
+  gWifi.startSetupAp();
+  gIpc.setupAp = true;
+  postUiText(uiMsg != nullptr ? uiMsg : "AP setup mode");
+}
+
+static void finishConnect(WifiConnectState st) {
+  gNetWork = NetWork::Idle;
+  const bool fromAuto = gConnectFromAutoReconnect;
+  gConnectFromAutoReconnect = false;
+
+  if (st == WifiConnectState::Connected) {
+    char buf[48];
+    snprintf(buf, sizeof(buf), "OK %s", gWifi.localIp().toString().c_str());
+    postUiText(buf);
+    Serial.printf("STA IP: %s  (http://%s/)\n", gWifi.localIp().toString().c_str(),
+                  gWifi.localIp().toString().c_str());
+    // STA is up — SoftAP must go away (was escape hatch only).
+    gWifi.stopAp();
+    gIpc.setupAp = false;
+  } else if (fromAuto) {
+    // Backoff retry continues inside WifiManager; SoftAP only on give-up.
+    postUiText("WiFi retry...");
+  } else {
+    postUiText("WiFi failed");
+    if (gBootNeedApIfFail) {
+      openSetupApIfNeeded("AP setup mode");
+    }
+  }
+  gStopApOnConnectOk = false;
+  gBootNeedApIfFail = false;
+}
+
 static void handleConnect(const char* ssid, const char* pass) {
   if (!settingsLock(pdMS_TO_TICKS(500))) {
     postUiText("Settings busy");
@@ -36,25 +103,11 @@ static void handleConnect(const char* ssid, const char* pass) {
   }
   gSettings.wifiSsid = ssid;
   gSettings.wifiPass = pass;
-  gStore.save(gSettings);
   AppSettings copy = gSettings;
   settingsUnlock();
+  gStore.save(copy);
 
-  postUiText("WiFi joining...");
-  const bool ok = gWifi.connectSta(copy);
-  if (ok) {
-    char buf[48];
-    snprintf(buf, sizeof(buf), "OK %s", gWifi.localIp().toString().c_str());
-    postUiText(buf);
-    Serial.printf("STA IP: %s  (http://%s/)\n", gWifi.localIp().toString().c_str(),
-                  gWifi.localIp().toString().c_str());
-    if (gIpc.setupAp) {
-      gWifi.stopAp();
-      gIpc.setupAp = false;
-    }
-  } else {
-    postUiText("WiFi failed");
-  }
+  startStaConnect(copy, gIpc.setupAp);
 }
 
 static void handleNetRequest(const NetRequest& req) {
@@ -63,16 +116,22 @@ static void handleNetRequest(const NetRequest& req) {
       handleConnect(req.ssid, req.pass);
       break;
     case NetReqType::ScanWifi: {
-      auto nets = gWifi.scanNetworks();
-      if (xSemaphoreTake(gIpc.scanMutex, pdMS_TO_TICKS(200)) == pdTRUE) {
-        gIpc.scanResults = nets;
-        gIpc.scanReady = true;
-        xSemaphoreGive(gIpc.scanMutex);
+      if (gNetWork != NetWork::Idle || gWifi.isBusy()) {
+        postUiText("WiFi busy");
+        UiMsg msg;
+        msg.type = UiMsgType::ScanFailed;
+        msg.text[0] = '\0';
+        xQueueSend(gIpc.uiMsg, &msg, 0);
+        break;
       }
-      UiMsg msg;
-      msg.type = nets.empty() ? UiMsgType::ScanFailed : UiMsgType::ScanResult;
-      msg.text[0] = '\0';
-      xQueueSend(gIpc.uiMsg, &msg, 0);
+      if (!gWifi.startScan()) {
+        UiMsg msg;
+        msg.type = UiMsgType::ScanFailed;
+        msg.text[0] = '\0';
+        xQueueSend(gIpc.uiMsg, &msg, 0);
+        break;
+      }
+      gNetWork = NetWork::Scanning;
       break;
     }
     case NetReqType::ApplyStaticIp: {
@@ -84,30 +143,31 @@ static void handleNetRequest(const NetRequest& req) {
       settingsUnlock();
       if (!gWifi.isStaConnected() && copy.wifiSsid.isEmpty()) {
         postUiText("Connect WiFi first");
-      } else if (gWifi.detectIpConflict(copy.staticIp)) {
-        postUiText("IP CONFLICT!");
-        Serial.printf("IP conflict on %s\n", copy.staticIp.toString().c_str());
+      } else if (gNetWork != NetWork::Idle || gWifi.isBusy()) {
+        postUiText("WiFi busy");
+      } else if (!gWifi.isStaConnected()) {
+        // No live STA to ARP-probe against; just try connect with static config.
+        startStaConnect(copy, false);
+      } else if (!gWifi.beginConflictProbe(copy.staticIp)) {
+        postUiText("Probe failed");
       } else {
-        const bool ok = gWifi.connectSta(copy);
-        if (ok) {
-          char buf[40];
-          snprintf(buf, sizeof(buf), "IP %s", gWifi.localIp().toString().c_str());
-          postUiText(buf);
-        } else {
-          postUiText("Static IP fail");
-        }
+        gPendingSta = copy;
+        gNetWork = NetWork::Probing;
+        postUiText("Checking IP...");
       }
       break;
     }
     case NetReqType::UseDhcp: {
-      if (settingsLock(pdMS_TO_TICKS(200))) {
-        gSettings.useStaticIp = false;
-        gStore.save(gSettings);
-        AppSettings copy = gSettings;
-        settingsUnlock();
-        if (!copy.wifiSsid.isEmpty()) {
-          gWifi.connectSta(copy);
-        }
+      if (!settingsLock(pdMS_TO_TICKS(200))) {
+        postUiText("Settings busy");
+        break;
+      }
+      gSettings.useStaticIp = false;
+      AppSettings copy = gSettings;
+      settingsUnlock();
+      gStore.save(copy);
+      if (!copy.wifiSsid.isEmpty()) {
+        startStaConnect(copy, false);
       }
       break;
     }
@@ -118,39 +178,154 @@ static void handleNetRequest(const NetRequest& req) {
   }
 }
 
+static void pollDisconnectAndReconnect() {
+  // Connecting owns DISC via pollConnect; elsewhere consume link-loss edges.
+  if (gNetWork != NetWork::Connecting) {
+    uint16_t discReason = 0;
+    if (gWifi.consumeDisconnect(&discReason)) {
+      char buf[40];
+      snprintf(buf, sizeof(buf), "WiFi lost (%u)", discReason);
+      postUiText(buf);
+    }
+  }
+
+  if (gWifi.consumeReconnectGiveUp()) {
+    openSetupApIfNeeded("AP setup mode");
+  }
+
+  if (gNetWork != NetWork::Idle) {
+    return;
+  }
+
+  AppSettings recon;
+  if (gWifi.pollAutoReconnect(&recon)) {
+    gPendingSta = recon;
+    gStopApOnConnectOk = gIpc.setupAp;
+    gConnectFromAutoReconnect = true;
+    gNetWork = NetWork::Connecting;
+    postUiText("WiFi rejoin...");
+  }
+}
+
+static void pollNetWork() {
+  pollDisconnectAndReconnect();
+
+  switch (gNetWork) {
+    case NetWork::Connecting: {
+      const WifiConnectState st = gWifi.pollConnect();
+      if (st == WifiConnectState::Connecting) {
+        break;
+      }
+      finishConnect(st);
+      break;
+    }
+    case NetWork::Scanning: {
+      std::vector<WifiNetwork> nets;
+      const WifiScanState st = gWifi.pollScan(&nets);
+      if (st == WifiScanState::Running) {
+        break;
+      }
+      gNetWork = NetWork::Idle;
+      if (st == WifiScanState::Done) {
+        if (xSemaphoreTake(gIpc.scanMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+          gIpc.scanResults = nets;
+          gIpc.scanReady = true;
+          xSemaphoreGive(gIpc.scanMutex);
+        }
+        UiMsg msg;
+        msg.type = nets.empty() ? UiMsgType::ScanFailed : UiMsgType::ScanResult;
+        msg.text[0] = '\0';
+        xQueueSend(gIpc.uiMsg, &msg, 0);
+      } else {
+        UiMsg msg;
+        msg.type = UiMsgType::ScanFailed;
+        msg.text[0] = '\0';
+        xQueueSend(gIpc.uiMsg, &msg, 0);
+      }
+      break;
+    }
+    case NetWork::Probing: {
+      const WifiProbeState st = gWifi.pollConflictProbe();
+      if (st == WifiProbeState::Running) {
+        break;
+      }
+      gNetWork = NetWork::Idle;
+      if (st == WifiProbeState::Conflict) {
+        postUiText("IP CONFLICT!");
+        Serial.printf("IP conflict on %s\n", gPendingSta.staticIp.toString().c_str());
+      } else if (st == WifiProbeState::Clear) {
+        startStaConnect(gPendingSta, false);
+      } else {
+        postUiText("Probe failed");
+      }
+      break;
+    }
+    case NetWork::Idle:
+    default:
+      break;
+  }
+}
+
 static void taskTime(void* /*arg*/) {
   esp_task_wdt_add(nullptr);
   gGps.setTimeTask(xTaskGetCurrentTaskHandle());
 
+  // Cache last successful settings read so a busy mutex never looks like Refuse
+  // and aborts Holdover mid-flight.
+  AnomalyPolicy cachedPolicy = AnomalyPolicy::Refuse;
+  uint16_t cachedHoldSec = CLK_HOLDOVER_SHORT_SEC;
+  if (settingsLock(pdMS_TO_TICKS(100))) {
+    cachedPolicy = gSettings.anomalyPolicy;
+    cachedHoldSec = gSettings.holdoverSec;
+    settingsUnlock();
+  }
+
   for (;;) {
-    // Wake on PPS notify, or poll every 1ms for NMEA/UDP.
     ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1));
-    gGps.loop();
+
+    if (settingsLock(0)) {
+      cachedPolicy = gSettings.anomalyPolicy;
+      cachedHoldSec = gSettings.holdoverSec;
+      settingsUnlock();
+    }
+
+    gGps.loop(cachedPolicy, cachedHoldSec);
     gNtp.loop(gGps);
+    ipcKickTime();
     esp_task_wdt_reset();
   }
 }
 
 static void taskNet(void* /*arg*/) {
-  // Initial STA connect (may block — isolated from time task).
   AppSettings boot;
   if (settingsLock(pdMS_TO_TICKS(500))) {
     boot = gSettings;
     settingsUnlock();
   }
+
+  gWifi.setAutoReconnect(boot.autoReconnect);
+
+  // Start HTTP early so SoftAP/STA pages stay responsive during connect.
+  gPortal.begin(&gWifi, &gGps, &gNtp);
+
   if (!boot.wifiSsid.isEmpty()) {
-    if (gWifi.connectSta(boot)) {
-      Serial.printf("STA IP: %s  (http://%s/)\n", gWifi.localIp().toString().c_str(),
-                    gWifi.localIp().toString().c_str());
+    gBootNeedApIfFail = true;
+    if (!gWifi.beginConnect(boot)) {
+      gWifi.startSetupAp();
+      gIpc.setupAp = true;
+      postUiText("AP setup mode");
+      gBootNeedApIfFail = false;
+    } else {
+      gPendingSta = boot;
+      gNetWork = NetWork::Connecting;
+      postUiText("WiFi joining...");
     }
-  }
-  if (!gWifi.isStaConnected()) {
+  } else {
     gWifi.startSetupAp();
     gIpc.setupAp = true;
     postUiText("AP setup mode");
+    gBootNeedApIfFail = false;
   }
-
-  gPortal.begin(&gWifi, &gGps, &gNtp);
 
   for (;;) {
     NetRequest req;
@@ -163,7 +338,9 @@ static void taskNet(void* /*arg*/) {
       handleConnect(ssid.c_str(), pass.c_str());
     }
 
+    pollNetWork();
     gPortal.loop();
+    ipcKickNet();
     vTaskDelay(pdMS_TO_TICKS(5));
   }
 }
@@ -172,6 +349,7 @@ static void taskUi(void* /*arg*/) {
   for (;;) {
     gEnc.loop();
     const GpsStatus st = gGps.snapshot();
+    ipcKickUi();
     gLeds.loop(gIpc.setupAp, gWifi.isStaConnected(), st);
     gUi.loop(gEnc, gGps, gWifi);
     vTaskDelay(pdMS_TO_TICKS(10));
