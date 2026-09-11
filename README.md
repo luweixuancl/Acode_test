@@ -113,3 +113,5 @@ platformio.ini
 本地时钟 / GPS 交叉检核与异常策略已落地，见 [docs/local_clock_gps_check.md](docs/local_clock_gps_check.md)。
 
 WiFi 事件 FSM、自动重连与 C3 无双核说明见 [docs/wifi_event_fsm.md](docs/wifi_event_fsm.md)。
+
+NTP 比对测试（GPS vs 本机/阿里云，2026-09-11）见 [docs/ntp_cmp_test_20260911.md](docs/ntp_cmp_test_20260911.md)。
