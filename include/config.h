@@ -1,7 +1,7 @@
 #pragma once
 
 // ---------------------------------------------------------------------------
-// Hardware wiring (合宙 CORE ESP32-C3 + DX-GP22 + SSD1306 + KY-040)
+// Hardware wiring (合宙 CORE ESP32-C3 + DX-GP22 + SH1107/SSD1107 OLED + KY-040)
 // Adjust these pins if your carrier board differs.
 // ---------------------------------------------------------------------------
 
@@ -15,12 +15,13 @@
 #define GPS_DEBUG            0   // 1 = 每秒向 UART0 打印定位/PPS（time 任务内，默认关）
 #define GPS_DEBUG_NMEA       0   // 1 = 把 NMEA 原文转发到 UART0
 
-// SSD1306 128x64 OLED over I2C
+// SH1107 / SSD1107 0.96" 64x128 OLED over I2C (native portrait; setRotation(1) → 128x64 UI)
 #define PIN_OLED_SDA         8
 #define PIN_OLED_SCL        10
 #define OLED_I2C_ADDR     0x3C
-#define OLED_WIDTH         128
-#define OLED_HEIGHT         64
+#define OLED_WIDTH          64
+#define OLED_HEIGHT        128
+#define OLED_ROTATION        1   // 1 = landscape UI on portrait panel
 
 // KY-040 rotary encoder
 #define PIN_ENC_A            2

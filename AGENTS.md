@@ -1,6 +1,6 @@
 # AGENTS.md
 
-ESP32-C3 GNSS Stratum-1 NTP firmware (Arduino / PlatformIO). Hardware: 合宙 CORE ESP32-C3, 大夏龙雀 DX-GP22, SSD1306 OLED, KY-040 encoder, on-board LEDs D4/D5.
+ESP32-C3 GNSS Stratum-1 NTP firmware (Arduino / PlatformIO). Hardware: 合宙 CORE ESP32-C3, 大夏龙雀 DX-GP22, SH1107/SSD1107 64×128 OLED (UI rotated 128×64), KY-040 encoder, on-board LEDs D4/D5.
 
 ## Commands
 
@@ -36,7 +36,7 @@ Headers in `include/`, implementations in `src/`. One class per pair.
 
 ## Pins (`config.h`)
 
-UART0 调试 (Serial 115200): RX 20, TX 21（板载 CH343；`ARDUINO_USB_CDC_ON_BOOT=0`）。GNSS UART1 9600: RX 1, TX 0, PPS 4。OLED I2C: SDA 8, SCL 10, addr `0x3C`。Encoder: A 2, B 3, SW 5。LEDs active HIGH: D4=12, D5=13。GPS 调试开关：`GPS_DEBUG` / `GPS_DEBUG_NMEA`。
+UART0 调试 (Serial 115200): RX 20, TX 21（板载 CH343；`ARDUINO_USB_CDC_ON_BOOT=0`）。GNSS UART1 9600: RX 1, TX 0, PPS 4。OLED I2C SH1107 64×128: SDA 8, SCL 10, addr `0x3C`（`OLED_ROTATION=1` → 逻辑 128×64）。Encoder: A 2, B 3, SW 5。LEDs active HIGH: D4=12, D5=13。GPS 调试开关：`GPS_DEBUG` / `GPS_DEBUG_NMEA`。
 
 Do not hardcode pins in `.cpp`; use `config.h` macros.
 
@@ -61,7 +61,7 @@ Do not hardcode pins in `.cpp`; use `config.h` macros.
 - ISRs (`IRAM_ATTR`): PPS plus encoder A **and** B (CHANGE). Keep them short; share state via `volatile`. Encoder uses `esp_timer_get_time()` debounce (no `millis()` in ISR); rotate is consumed with `noInterrupts()`.
 - LEDs: HIGH = on. D4: AP ~4 Hz, no STA ~1 Hz, STA heartbeat (~900/100 ms). D5: off / ACQ blink / HLD fast blink / LCK·DEG heartbeat. Alternate panic blink if any task kick goes stale (~3 s).
 - Settings persist with `Preferences` keys: `ssid`, `pass`, `static`, `ip`, `gw`, `mask`, `dns`, `tz`, `apol`, `ahold`, `arec` (auto-reconnect, default true). Default timezone +8; anomaly Refuse.
-- Libs: ArduinoJson 7, Adafruit SSD1306/GFX, TinyGPSPlus — versions pinned in `platformio.ini`.
+- Libs: ArduinoJson 7, Adafruit SH110X/GFX, TinyGPSPlus — versions pinned in `platformio.ini`.
 
 ## Do not
 

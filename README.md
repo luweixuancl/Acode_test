@@ -23,9 +23,9 @@
 | DX-GP22 | 1PPS | 4 |
 | DX-GP22 | VCC | 3.3V 或 5V（按模块说明） |
 | DX-GP22 | GND | GND |
-| SSD1306 OLED | SDA | 8 |
-| SSD1306 OLED | SCL | 10 |
-| SSD1306 | VCC/GND | 3.3V / GND |
+| SH1107/SSD1107 OLED 64×128 | SDA | 8 |
+| SH1107/SSD1107 OLED 64×128 | SCL | 10 |
+| OLED | VCC/GND | 3.3V / GND |
 | KY-040 编码器 | CLK(A) | 2 |
 | KY-040 | DT(B) | 3 |
 | KY-040 | SW | 5 |
