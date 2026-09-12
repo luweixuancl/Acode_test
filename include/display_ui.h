@@ -2,7 +2,7 @@
 
 #include <Arduino.h>
 #include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
+#include <Adafruit_SH110X.h>
 #include <vector>
 #include "config.h"
 #include "gps_service.h"
@@ -61,7 +61,7 @@ class DisplayUi {
   void handleAnomaly(int8_t rot, bool click, bool longPress);
   void drainUiMessages();
 
-  Adafruit_SSD1306 display_{OLED_WIDTH, OLED_HEIGHT, &Wire, -1};
+  Adafruit_SH1107 display_{OLED_WIDTH, OLED_HEIGHT, &Wire, -1};
   UiMode mode_ = UiMode::Home;
   uint8_t menuIndex_ = 0;
   uint8_t wifiIndex_ = 0;

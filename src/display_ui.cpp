@@ -19,11 +19,13 @@ static const char PWD_CHARS[] =
 void DisplayUi::begin() {
   Wire.begin(PIN_OLED_SDA, PIN_OLED_SCL);
   Wire.setClock(400000);
-  if (!display_.begin(SSD1306_SWITCHCAPVCC, OLED_I2C_ADDR)) {
-    Serial.println("SSD1306 init failed");
+  delay(250);  // SH1107 power-up settle
+  if (!display_.begin(OLED_I2C_ADDR, true)) {
+    Serial.println("SH1107 init failed");
   }
+  display_.setRotation(OLED_ROTATION);
   display_.clearDisplay();
-  display_.setTextColor(SSD1306_WHITE);
+  display_.setTextColor(SH110X_WHITE);
   display_.setTextSize(1);
   display_.setCursor(0, 0);
   display_.println("ESP32-C3 NTP");
@@ -122,7 +124,7 @@ void DisplayUi::loop(EncoderInput& enc, GpsService& gps, WifiManager& wifi) {
 
   display_.clearDisplay();
   display_.setTextSize(1);
-  display_.setTextColor(SSD1306_WHITE);
+  display_.setTextColor(SH110X_WHITE);
   switch (mode_) {
     case UiMode::Home:
       drawHome(st, wifi, settings);
