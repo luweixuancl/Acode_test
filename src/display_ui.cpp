@@ -1,4 +1,5 @@
 #include "display_ui.h"
+#include "app_ipc.h"
 #include <Wire.h>
 #include <WiFi.h>
 
@@ -8,20 +9,23 @@ static const char* MENU_LABELS[] = {
     "Set Static IP",
     "Use DHCP",
     "Timezone",
+    "Anomaly Mode",
     "Restart",
 };
 
 static const char PWD_CHARS[] =
     "<ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%&*-_.";
-// '<' means backspace when appended via click
 
 void DisplayUi::begin() {
   Wire.begin(PIN_OLED_SDA, PIN_OLED_SCL);
-  if (!display_.begin(SSD1306_SWITCHCAPVCC, OLED_I2C_ADDR)) {
-    Serial.println("SSD1306 init failed");
+  Wire.setClock(400000);
+  delay(250);  // SH1107 power-up settle
+  if (!display_.begin(OLED_I2C_ADDR, true)) {
+    Serial.println("SH1107 init failed");
   }
+  display_.setRotation(OLED_ROTATION);
   display_.clearDisplay();
-  display_.setTextColor(SSD1306_WHITE);
+  display_.setTextColor(SH110X_WHITE);
   display_.setTextSize(1);
   display_.setCursor(0, 0);
   display_.println("ESP32-C3 NTP");
@@ -35,45 +39,38 @@ void DisplayUi::showMessage(const String& msg) {
   mode_ = UiMode::Message;
 }
 
-bool DisplayUi::takePendingWifi(String& ssid, String& pass) {
-  if (!pendingWifi_) {
-    return false;
-  }
-  pendingWifi_ = false;
-  ssid = pendingSsid_;
-  pass = pendingPass_;
-  return true;
+void DisplayUi::onScanResults(const std::vector<WifiNetwork>& nets) {
+  networks_ = nets;
+  wifiIndex_ = 0;
+  scanPending_ = false;
+  mode_ = UiMode::WifiScan;
+  messageUntil_ = 0;
 }
 
-bool DisplayUi::takeApplyStaticIp() {
-  if (!pendingStatic_) {
-    return false;
+void DisplayUi::drainUiMessages() {
+  if (!gIpc.uiMsg) {
+    return;
   }
-  pendingStatic_ = false;
-  return true;
+  UiMsg msg;
+  while (xQueueReceive(gIpc.uiMsg, &msg, 0) == pdTRUE) {
+    if (msg.type == UiMsgType::Text) {
+      showMessage(String(msg.text));
+    } else if (msg.type == UiMsgType::ScanResult) {
+      if (xSemaphoreTake(gIpc.scanMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+        onScanResults(gIpc.scanResults);
+        gIpc.scanReady = false;
+        xSemaphoreGive(gIpc.scanMutex);
+      }
+    } else if (msg.type == UiMsgType::ScanFailed) {
+      scanPending_ = false;
+      showMessage("Scan failed");
+    }
+  }
 }
 
-bool DisplayUi::takeStartWebSetup() {
-  if (!pendingWeb_) {
-    return false;
-  }
-  pendingWeb_ = false;
-  return true;
-}
+void DisplayUi::loop(EncoderInput& enc, GpsService& gps, WifiManager& wifi) {
+  drainUiMessages();
 
-bool DisplayUi::takeUseDhcp() {
-  if (!pendingDhcp_) {
-    return false;
-  }
-  pendingDhcp_ = false;
-  return true;
-}
-
-void DisplayUi::loop(EncoderInput& enc,
-                     GpsService& gps,
-                     WifiManager& wifi,
-                     AppSettings& settings,
-                     SettingsStore& store) {
   int8_t rot = enc.consumeRotate();
   bool click = enc.consumeClick();
   bool longPress = enc.consumeLongPress();
@@ -83,19 +80,22 @@ void DisplayUi::loop(EncoderInput& enc,
       handleHome(rot, click);
       break;
     case UiMode::Menu:
-      handleMenu(rot, click, longPress, settings, store);
+      handleMenu(rot, click, longPress);
       break;
     case UiMode::WifiScan:
-      handleWifiScan(rot, click, wifi);
+      handleWifiScan(rot, click);
       break;
     case UiMode::WifiPassword:
       handlePassword(rot, click, longPress);
       break;
     case UiMode::SetIp:
-      handleSetIp(rot, click, longPress, settings, store, wifi);
+      handleSetIp(rot, click, longPress);
       break;
     case UiMode::SetTimezone:
-      handleTimezone(rot, click, settings, store);
+      handleTimezone(rot, click);
+      break;
+    case UiMode::SetAnomaly:
+      handleAnomaly(rot, click, longPress);
       break;
     case UiMode::WebSetupHint:
       if (click || longPress) {
@@ -114,12 +114,20 @@ void DisplayUi::loop(EncoderInput& enc,
   }
   lastDrawMs_ = millis();
 
+  AppSettings settings;
+  if (settingsLock(pdMS_TO_TICKS(20))) {
+    settings = gSettings;
+    settingsUnlock();
+  }
+
+  const GpsStatus st = gps.snapshot();
+
   display_.clearDisplay();
   display_.setTextSize(1);
-  display_.setTextColor(SSD1306_WHITE);
+  display_.setTextColor(SH110X_WHITE);
   switch (mode_) {
     case UiMode::Home:
-      drawHome(gps, wifi, settings);
+      drawHome(st, wifi, settings);
       break;
     case UiMode::Menu:
       drawMenu();
@@ -136,6 +144,9 @@ void DisplayUi::loop(EncoderInput& enc,
     case UiMode::SetTimezone:
       drawTimezone(settings);
       break;
+    case UiMode::SetAnomaly:
+      drawAnomaly(settings);
+      break;
     case UiMode::WebSetupHint:
       drawWebHint();
       break;
@@ -146,8 +157,7 @@ void DisplayUi::loop(EncoderInput& enc,
   display_.display();
 }
 
-void DisplayUi::drawHome(const GpsService& gps, const WifiManager& wifi, const AppSettings& settings) {
-  const auto& st = gps.status();
+void DisplayUi::drawHome(const GpsStatus& st, const WifiManager& wifi, const AppSettings& settings) {
   display_.setCursor(0, 0);
   display_.println("ESP32-C3 NTP Srv");
 
@@ -171,33 +181,42 @@ void DisplayUi::drawHome(const GpsService& gps, const WifiManager& wifi, const A
   }
 
   display_.setCursor(0, 36);
-  display_.print("PPS ");
-  display_.print(st.ppsSeen ? "OK" : "--");
-  display_.print("  TZ");
-  if (settings.timezoneHours >= 0) {
-    display_.print("+");
-  }
-  display_.print(settings.timezoneHours);
+  display_.print(clockStateLabel(st.clockState));
+  display_.print(" R");
+  display_.print(st.residualMs);
+  display_.print(" A:");
+  display_.print(anomalyPolicyShortLabel(settings.anomalyPolicy));
 
   display_.setCursor(0, 48);
-  if (st.validFix && st.utcEpoch > 0) {
+  if (st.utcEpoch > 0) {
     time_t local = static_cast<time_t>(st.utcEpoch) + settings.timezoneHours * 3600L;
-    struct tm* tm = gmtime(&local);
+    struct tm tmv = {};
+    gmtime_r(&local, &tmv);
     char buf[20];
-    snprintf(buf, sizeof(buf), "%02d:%02d:%02d", tm->tm_hour, tm->tm_min, tm->tm_sec);
+    snprintf(buf, sizeof(buf), "%02d:%02d:%02d", tmv.tm_hour, tmv.tm_min, tmv.tm_sec);
     display_.print(buf);
   } else {
     display_.print("--:--:--");
   }
   display_.setCursor(72, 48);
-  display_.print("Click=Menu");
+  display_.print(st.timeValid ? "SYNC" : "WAIT");
 }
 
 void DisplayUi::drawMenu() {
   display_.setCursor(0, 0);
   display_.println("Menu  long=Back");
-  for (uint8_t i = 0; i < static_cast<uint8_t>(MenuItem::Count); ++i) {
-    display_.setCursor(0, 12 + i * 10);
+  const uint8_t count = static_cast<uint8_t>(MenuItem::Count);
+  const uint8_t visible = 5;
+  uint8_t start = 0;
+  if (menuIndex_ >= visible) {
+    start = menuIndex_ - visible + 1;
+  }
+  for (uint8_t row = 0; row < visible; ++row) {
+    const uint8_t i = static_cast<uint8_t>(start + row);
+    if (i >= count) {
+      break;
+    }
+    display_.setCursor(0, 12 + row * 10);
     display_.print(i == menuIndex_ ? ">" : " ");
     display_.print(MENU_LABELS[i]);
   }
@@ -206,6 +225,11 @@ void DisplayUi::drawMenu() {
 void DisplayUi::drawWifiScan() {
   display_.setCursor(0, 0);
   display_.println("WiFi list click=OK");
+  if (scanPending_) {
+    display_.setCursor(0, 20);
+    display_.println("Scanning...");
+    return;
+  }
   if (networks_.empty()) {
     display_.setCursor(0, 20);
     display_.println("Empty. Click scan");
@@ -287,6 +311,19 @@ void DisplayUi::drawTimezone(const AppSettings& settings) {
   display_.print("rot=chg click=save");
 }
 
+void DisplayUi::drawAnomaly(const AppSettings& settings) {
+  (void)settings;
+  display_.setCursor(0, 0);
+  display_.println("Anomaly Mode");
+  display_.setCursor(0, 16);
+  display_.print(">");
+  display_.println(anomalyPolicyMenuLabel(editPolicy_));
+  display_.setCursor(0, 40);
+  display_.println("rot=chg click=save");
+  display_.setCursor(0, 52);
+  display_.println("long=back");
+}
+
 void DisplayUi::drawMessage() {
   display_.setCursor(0, 20);
   display_.println(message_);
@@ -315,9 +352,7 @@ void DisplayUi::handleHome(int8_t rot, bool click) {
   }
 }
 
-void DisplayUi::handleMenu(int8_t rot, bool click, bool longPress, AppSettings& settings, SettingsStore& store) {
-  (void)settings;
-  (void)store;
+void DisplayUi::handleMenu(int8_t rot, bool click, bool longPress) {
   if (longPress) {
     mode_ = UiMode::Home;
     return;
@@ -335,23 +370,40 @@ void DisplayUi::handleMenu(int8_t rot, bool click, bool longPress, AppSettings& 
     case MenuItem::WifiScan:
       networks_.clear();
       wifiIndex_ = 0;
+      scanPending_ = false;
       mode_ = UiMode::WifiScan;
       break;
-    case MenuItem::WebSetup:
-      pendingWeb_ = true;
+    case MenuItem::WebSetup: {
+      NetRequest req;
+      req.type = NetReqType::StartWebSetup;
+      postNetRequest(req);
       mode_ = UiMode::WebSetupHint;
       break;
+    }
     case MenuItem::SetStaticIp:
-      editIp_ = settings.staticIp;
+      if (settingsLock(pdMS_TO_TICKS(50))) {
+        editIp_ = gSettings.staticIp;
+        settingsUnlock();
+      }
       ipOctet_ = 0;
       mode_ = UiMode::SetIp;
       break;
-    case MenuItem::UseDhcp:
-      pendingDhcp_ = true;
+    case MenuItem::UseDhcp: {
+      NetRequest req;
+      req.type = NetReqType::UseDhcp;
+      postNetRequest(req);
       showMessage("DHCP enabled");
       break;
+    }
     case MenuItem::Timezone:
       mode_ = UiMode::SetTimezone;
+      break;
+    case MenuItem::AnomalyMode:
+      if (settingsLock(pdMS_TO_TICKS(50))) {
+        editPolicy_ = gSettings.anomalyPolicy;
+        settingsUnlock();
+      }
+      mode_ = UiMode::SetAnomaly;
       break;
     case MenuItem::Restart:
       ESP.restart();
@@ -361,16 +413,21 @@ void DisplayUi::handleMenu(int8_t rot, bool click, bool longPress, AppSettings& 
   }
 }
 
-void DisplayUi::handleWifiScan(int8_t rot, bool click, WifiManager& wifi) {
-  if (networks_.empty()) {
+void DisplayUi::handleWifiScan(int8_t rot, bool click) {
+  if (networks_.empty() && !scanPending_) {
     if (click) {
-      showMessage("Scanning...");
-      display_.display();
-      networks_ = wifi.scanNetworks();
-      wifiIndex_ = 0;
-      mode_ = UiMode::WifiScan;
-      messageUntil_ = 0;
+      NetRequest req;
+      req.type = NetReqType::ScanWifi;
+      if (postNetRequest(req)) {
+        scanPending_ = true;
+        showMessage("Scanning...");
+      } else {
+        showMessage("Scan busy");
+      }
     }
+    return;
+  }
+  if (scanPending_) {
     return;
   }
   if (rot > 0 && wifiIndex_ + 1 < networks_.size()) {
@@ -378,7 +435,7 @@ void DisplayUi::handleWifiScan(int8_t rot, bool click, WifiManager& wifi) {
   } else if (rot < 0 && wifiIndex_ > 0) {
     wifiIndex_--;
   }
-  if (click) {
+  if (click && !networks_.empty()) {
     pendingSsid_ = networks_[wifiIndex_].ssid;
     password_ = "";
     pwdCursor_ = 0;
@@ -404,15 +461,16 @@ void DisplayUi::handlePassword(int8_t rot, bool click, bool longPress) {
     }
   }
   if (longPress) {
-    pendingPass_ = password_;
-    pendingWifi_ = true;
+    NetRequest req;
+    req.type = NetReqType::ConnectWifi;
+    strncpy(req.ssid, pendingSsid_.c_str(), sizeof(req.ssid) - 1);
+    strncpy(req.pass, password_.c_str(), sizeof(req.pass) - 1);
+    postNetRequest(req);
     showMessage("Connecting...");
   }
 }
 
-void DisplayUi::handleSetIp(int8_t rot, bool click, bool longPress, AppSettings& settings,
-                            SettingsStore& store, WifiManager& wifi) {
-  (void)wifi;
+void DisplayUi::handleSetIp(int8_t rot, bool click, bool longPress) {
   if (rot != 0) {
     int v = editIp_[ipOctet_] + rot;
     if (v < 0) {
@@ -427,29 +485,87 @@ void DisplayUi::handleSetIp(int8_t rot, bool click, bool longPress, AppSettings&
     ipOctet_ = (ipOctet_ + 1) % 4;
   }
   if (longPress) {
-    settings.staticIp = editIp_;
-    settings.useStaticIp = true;
-    // Default gateway to x.x.x.1 on same subnet if unset/mismatched
-    settings.gateway = IPAddress(editIp_[0], editIp_[1], editIp_[2], 1);
-    store.save(settings);
-    pendingStatic_ = true;
+    AppSettings copy;
+    bool locked = false;
+    if (settingsLock(pdMS_TO_TICKS(100))) {
+      gSettings.staticIp = editIp_;
+      gSettings.useStaticIp = true;
+      // Keep existing gateway when still on the same /24; otherwise default to .1.
+      IPAddress gw = gSettings.gateway;
+      if (gw[0] != editIp_[0] || gw[1] != editIp_[1] || gw[2] != editIp_[2]) {
+        gw = IPAddress(editIp_[0], editIp_[1], editIp_[2], 1);
+      }
+      gSettings.gateway = gw;
+      copy = gSettings;
+      settingsUnlock();
+      locked = true;
+    }
+    if (locked) {
+      gStore.save(copy);
+    }
+    NetRequest req;
+    req.type = NetReqType::ApplyStaticIp;
+    req.staticIp = editIp_;
+    postNetRequest(req);
     showMessage("Checking IP...");
   }
 }
 
-void DisplayUi::handleTimezone(int8_t rot, bool click, AppSettings& settings, SettingsStore& store) {
+void DisplayUi::handleTimezone(int8_t rot, bool click) {
+  if (!settingsLock(pdMS_TO_TICKS(50))) {
+    return;
+  }
   if (rot != 0) {
-    int v = settings.timezoneHours + rot;
+    int v = gSettings.timezoneHours + rot;
     if (v < -12) {
       v = 14;
     }
     if (v > 14) {
       v = -12;
     }
-    settings.timezoneHours = static_cast<int8_t>(v);
+    gSettings.timezoneHours = static_cast<int8_t>(v);
   }
   if (click) {
-    store.save(settings);
+    AppSettings copy = gSettings;
+    settingsUnlock();
+    gStore.save(copy);
     showMessage("TZ saved");
+    return;
+  }
+  settingsUnlock();
+}
+
+void DisplayUi::handleAnomaly(int8_t rot, bool click, bool longPress) {
+  if (longPress) {
+    mode_ = UiMode::Home;
+    return;
+  }
+  if (rot != 0) {
+    int v = static_cast<int>(editPolicy_) + (rot > 0 ? 1 : -1);
+    if (v < 0) {
+      v = static_cast<int>(AnomalyPolicy::HoldoverLong);
+    }
+    if (v > static_cast<int>(AnomalyPolicy::HoldoverLong)) {
+      v = 0;
+    }
+    editPolicy_ = static_cast<AnomalyPolicy>(v);
+  }
+  if (click) {
+    AppSettings copy;
+    bool locked = false;
+    if (settingsLock(pdMS_TO_TICKS(100))) {
+      gSettings.anomalyPolicy = editPolicy_;
+      const uint16_t defHold = anomalyPolicyDefaultHoldoverSec(editPolicy_);
+      if (defHold > 0) {
+        gSettings.holdoverSec = defHold;
+      }
+      copy = gSettings;
+      settingsUnlock();
+      locked = true;
+    }
+    if (locked) {
+      gStore.save(copy);
+    }
+    showMessage(String("A:") + anomalyPolicyShortLabel(editPolicy_));
   }
 }

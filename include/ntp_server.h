@@ -7,12 +7,16 @@
 class NtpServer {
  public:
   void begin();
+  // Call only from task-time.
   void loop(const GpsService& gps);
+  uint32_t requestCount() const { return requestCount_; }
 
  private:
   void handlePacket(const GpsService& gps);
   static void writeTimestamp(uint8_t* pkt, int offset, uint32_t sec, uint32_t frac);
+  static void writeU32(uint8_t* pkt, int offset, uint32_t v);
 
   WiFiUDP udp_;
   uint8_t packet_[48];
+  uint32_t requestCount_ = 0;
 };

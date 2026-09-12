@@ -5,23 +5,27 @@
 #include "settings.h"
 #include "wifi_manager.h"
 
+class GpsService;
+class NtpServer;
+
 class WebPortal {
  public:
-  void begin(WifiManager* wifi, SettingsStore* store, AppSettings* settings);
+  void begin(WifiManager* wifi, GpsService* gps, NtpServer* ntp);
   void loop();
   bool consumeConnectRequest(String& ssid, String& pass);
 
  private:
   void handleRoot();
+  void handleSetup();
   void handleScan();
   void handleSave();
   void handleStatus();
-  String buildPage(const String& body) const;
+  String buildPage(const String& title, const String& body, bool refresh = false) const;
 
   WebServer server_{80};
   WifiManager* wifi_ = nullptr;
-  SettingsStore* store_ = nullptr;
-  AppSettings* settings_ = nullptr;
+  GpsService* gps_ = nullptr;
+  NtpServer* ntp_ = nullptr;
   bool pendingConnect_ = false;
   bool started_ = false;
   String pendingSsid_;
