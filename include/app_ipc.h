@@ -58,7 +58,7 @@ extern AppSettings gSettings;
 extern SettingsStore gStore;
 
 bool ipcInit();
-bool settingsLock(TickType_t ticks = portMAX_DELAY);
+bool settingsLock(TickType_t ticks);
 void settingsUnlock();
 bool postNetRequest(const NetRequest& req);
 bool postUiText(const char* text);

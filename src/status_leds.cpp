@@ -7,10 +7,7 @@ void StatusLeds::begin() {
   pinMode(PIN_LED_D5, OUTPUT);
   digitalWrite(PIN_LED_D4, LOW);
   digitalWrite(PIN_LED_D5, LOW);
-  const uint32_t now = millis();
-  gIpc.kickTimeMs = now;
-  gIpc.kickNetMs = now;
-  gIpc.kickUiMs = now;
+  // Leave kicks at 0 until each task actually runs (see tasksStale).
 }
 
 void StatusLeds::writeBlink(uint8_t pin, uint32_t nowMs, uint32_t halfPeriodMs) {
@@ -45,13 +42,21 @@ void StatusLeds::loop(bool apMode, bool wifiStaOk, const GpsStatus& st) {
   }
   lastUpdateMs_ = now;
 
-  // Panic: another task stopped kicking — alternate D4/D5 ~5 Hz.
+  // Panic: another task stopped kicking — alternate D4/D5 ~5 Hz; then soft-restart.
   if (tasksStale(now)) {
+    if (panicSinceMs_ == 0) {
+      panicSinceMs_ = now;
+    } else if ((now - panicSinceMs_) >= LED_TASK_PANIC_RESTART_MS) {
+      Serial.println("[leds] task stale too long — restart");
+      delay(50);
+      ESP.restart();
+    }
     const bool phase = ((now / LED_PANIC_HALF_PERIOD_MS) % 2) == 0;
     digitalWrite(PIN_LED_D4, phase ? HIGH : LOW);
     digitalWrite(PIN_LED_D5, phase ? LOW : HIGH);
     return;
   }
+  panicSinceMs_ = 0;
 
   if (wifiStaOk) {
     writeHeartbeat(PIN_LED_D4, now);

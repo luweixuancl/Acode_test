@@ -278,6 +278,7 @@ static void pollNetWork() {
 static void taskTime(void* /*arg*/) {
   esp_task_wdt_add(nullptr);
   gGps.setTimeTask(xTaskGetCurrentTaskHandle());
+  ipcKickTime();
 
   // Cache last successful settings read so a busy mutex never looks like Refuse
   // and aborts Holdover mid-flight.
@@ -306,6 +307,9 @@ static void taskTime(void* /*arg*/) {
 }
 
 static void taskNet(void* /*arg*/) {
+  esp_task_wdt_add(nullptr);
+  ipcKickNet();
+
   AppSettings boot;
   if (settingsLock(pdMS_TO_TICKS(500))) {
     boot = gSettings;
@@ -349,18 +353,33 @@ static void taskNet(void* /*arg*/) {
 
     pollNetWork();
     gPortal.loop();
+    static uint8_t heapLowStreak = 0;
+    if (ESP.getFreeHeap() < HEAP_RESTART_BYTES) {
+      if (++heapLowStreak >= HEAP_RESTART_SAMPLES) {
+        Serial.printf("[net] heap low (%u) x%u — restart\n",
+                      static_cast<unsigned>(ESP.getFreeHeap()), heapLowStreak);
+        delay(100);
+        ESP.restart();
+      }
+    } else {
+      heapLowStreak = 0;
+    }
     ipcKickNet();
+    esp_task_wdt_reset();
     vTaskDelay(pdMS_TO_TICKS(5));
   }
 }
 
 static void taskUi(void* /*arg*/) {
+  esp_task_wdt_add(nullptr);
+  ipcKickUi();
   for (;;) {
     gEnc.loop();
     const GpsStatus st = gGps.snapshot();
     ipcKickUi();
     gLeds.loop(gIpc.setupAp, gWifi.isStaConnected(), st);
     gUi.loop(gEnc, gGps, gWifi);
+    esp_task_wdt_reset();
     vTaskDelay(pdMS_TO_TICKS(10));
   }
 }
@@ -371,7 +390,15 @@ void setup() {
   Serial.println("\nESP32-C3 GNSS NTP Server (RTOS)");
 
   if (!ipcInit()) {
-    Serial.println("IPC init failed");
+    Serial.println("IPC init failed — halt/restart");
+    pinMode(PIN_LED_D4, OUTPUT);
+    pinMode(PIN_LED_D5, OUTPUT);
+    for (int i = 0; i < 50; ++i) {
+      digitalWrite(PIN_LED_D4, i & 1);
+      digitalWrite(PIN_LED_D5, !(i & 1));
+      delay(100);
+    }
+    ESP.restart();
   }
 
   gStore.begin();

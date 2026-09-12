@@ -28,7 +28,12 @@ void LocalClock::pushEdge(uint64_t edgeUs) {
 }
 
 void LocalClock::onPpsEdge(uint64_t edgeUs, uint32_t ppsCount) {
-  if (edgeCount_ > 0) {
+  uint32_t delta = 1;
+  if (lastPpsCount_ != 0 && ppsCount > lastPpsCount_) {
+    delta = ppsCount - lastPpsCount_;
+  }
+
+  if (edgeCount_ > 0 && delta == 1) {
     const uint8_t prevIdx = static_cast<uint8_t>((edgeHead_ + kRing - 1) % kRing);
     const uint64_t prev = edges_[prevIdx];
     if (edgeUs > prev) {
@@ -44,6 +49,11 @@ void LocalClock::onPpsEdge(uint64_t edgeUs, uint32_t ppsCount) {
         freqPpm_ = freqPpm_ * (1.0f - CLK_PPM_EMA_ALPHA) + samplePpm * CLK_PPM_EMA_ALPHA;
       }
     }
+  } else if (delta > 1) {
+    // Missed ISR deliveries / queue overflow — interval sample is not 1s.
+    if (ppsBadStreak_ < 250) {
+      ppsBadStreak_ = static_cast<uint8_t>(ppsBadStreak_ + delta);
+    }
   }
 
   pushEdge(edgeUs);
@@ -51,16 +61,31 @@ void LocalClock::onPpsEdge(uint64_t edgeUs, uint32_t ppsCount) {
   lastPpsCount_ = ppsCount;
   ppsStable_ = (ppsBadStreak_ < CLK_PPS_UNSTABLE_COUNT) && (edgeCount_ >= 2);
 
-  // Once disciplined, walk the UTC second with PPS — not with jittery NMEA arrival.
-  if (haveAnchor_ && ppsStable_ &&
+  // Once disciplined, walk UTC with PPS. Catch up by delta if edges were coalesced.
+  if (haveAnchor_ &&
       (state_ == ClockState::Locked || state_ == ClockState::Degraded ||
        state_ == ClockState::Holdover)) {
-    anchorUtcSec_ += 1;
-    anchorEdgeUs_ = edgeUs;
+    if (delta >= CLK_PPS_MISS_UNSYNC) {
+      Serial.printf("[clk] PPS miss delta=%u → unsync\n", static_cast<unsigned>(delta));
+      enterUnsynced();
+    } else if (ppsStable_ && delta == 1) {
+      anchorUtcSec_ += 1;
+      anchorEdgeUs_ = edgeUs;
+    } else if (delta > 1) {
+      // Coalesced edges without a stable 1s history: catch up but mark unstable.
+      anchorUtcSec_ += delta;
+      anchorEdgeUs_ = edgeUs;
+      Serial.printf("[clk] PPS catch-up +%u s (unstable)\n", static_cast<unsigned>(delta));
+      if (ppsBadStreak_ < 250) {
+        ppsBadStreak_ = static_cast<uint8_t>(ppsBadStreak_ + 1);
+      }
+      ppsStable_ = false;
+    }
   }
 
-  if (!ppsStable_ && (state_ == ClockState::Locked || state_ == ClockState::Degraded ||
-                      state_ == ClockState::Holdover)) {
+  if (!ppsStable_ &&
+      (state_ == ClockState::Locked || state_ == ClockState::Degraded ||
+       state_ == ClockState::Holdover)) {
     enterUnsynced();
   }
 }
@@ -99,6 +124,11 @@ void LocalClock::enterUnsynced() {
   state_ = ClockState::Unsynced;
   okStreak_ = 0;
   holdoverStartMs_ = 0;
+  haveAnchor_ = false;
+  ppsStable_ = false;
+  ppsBadStreak_ = 0;
+  edgeCount_ = 0;
+  edgeHead_ = 0;
 }
 
 void LocalClock::applyFail(AnomalyPolicy policy) {
@@ -285,8 +315,12 @@ uint32_t LocalClock::qualityMs() const {
     q = q < 50 ? 50 : q;
   }
   if (state_ == ClockState::Holdover) {
-    // Grow ~1ms per second of holdover; start higher so clients see degraded quality.
-    const uint32_t growMs = holdoverElapsedMs() / 1000;
+    // Honest free-run bound: max(|EMA ppm|, floor) × holdover age → ms.
+    const float ap = fabsf(freqPpm_);
+    const float usePpm = ap > CLK_HOLDOVER_PPM_FLOOR ? ap : CLK_HOLDOVER_PPM_FLOOR;
+    const float elapsedSec = static_cast<float>(holdoverElapsedMs()) / 1000.0f;
+    // error_s = ppm * 1e-6 * t_s  →  error_ms = ppm * t_s / 1000
+    const uint32_t growMs = static_cast<uint32_t>(usePpm * elapsedSec / 1000.0f);
     q = q + 50 + growMs;
   }
   const float ap = fabsf(freqPpm_);

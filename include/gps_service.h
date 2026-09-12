@@ -61,13 +61,20 @@ class GpsService {
   uint32_t lastCommittedSecond_ = 0xFFFFFFFF;
   bool haveCommit_ = false;
   bool ppsSeen_ = false;
+  uint32_t lastDrainedPpsCount_ = 0;
 
   mutable portMUX_TYPE mux_ = portMUX_INITIALIZER_UNLOCKED;
 
+  struct PpsIsrEdge {
+    uint64_t edgeUs;
+    uint32_t count;
+  };
+
   static portMUX_TYPE ppsMux_;
-  static volatile uint32_t ppsMillis_;
   static volatile uint32_t ppsCount_;
-  static volatile uint64_t ppsEdgeUs_;
-  static volatile bool ppsFlag_;
+  static volatile uint64_t ppsLastEdgeUs_;
+  static volatile uint8_t ppsQHead_;
+  static volatile uint8_t ppsQTail_;
+  static volatile PpsIsrEdge ppsQ_[GPS_PPS_ISR_QUEUE];
   static TaskHandle_t timeTask_;
 };

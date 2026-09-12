@@ -363,7 +363,7 @@ bool WifiManager::startScan() {
     return true;
   }
 
-  cancelAutoReconnect();
+  // Do not cancelAutoReconnect — scan must not abort STA recovery.
   takeEventBit(WifiEvtBits::ScanDone);
 
   const int16_t r = WiFi.scanNetworks(/*async=*/true, /*hidden=*/false);
@@ -372,6 +372,7 @@ bool WifiManager::startScan() {
     return false;
   }
   scanState_ = WifiScanState::Running;
+  scanStartedMs_ = millis();
   return true;
 }
 
@@ -417,6 +418,13 @@ WifiScanState WifiManager::pollScan(std::vector<WifiNetwork>* out) {
   const bool doneEvt = takeEventBit(WifiEvtBits::ScanDone);
   const int16_t n = WiFi.scanComplete();
   if (!doneEvt && n == WIFI_SCAN_RUNNING) {
+    if (static_cast<int32_t>(millis() - scanStartedMs_) >= static_cast<int32_t>(WIFI_SCAN_TIMEOUT_MS)) {
+      Serial.println("[wifi] scan timeout — abort");
+      WiFi.scanDelete();
+      lastScan_.clear();
+      scanState_ = WifiScanState::Failed;
+      return scanState_;
+    }
     return WifiScanState::Running;
   }
 

@@ -43,6 +43,7 @@
 #define DISPLAY_REFRESH_MS   250
 #define WIFI_CONNECT_TIMEOUT_MS 20000
 #define WIFI_NO_AP_REBEGIN_MS    3000  // re-WiFi.begin while Connecting after reason 201
+#define WIFI_SCAN_TIMEOUT_MS    15000  // async scan must not hang reconnect give-up
 #define IP_CONFLICT_TIMEOUT_MS   800
 // Auto-reconnect backoff (ms): attempt 1 immediate, then 2s/5s/10s/30s...
 #define WIFI_RECONNECT_MAX_ATTEMPTS    5
@@ -78,4 +79,15 @@
 #define CLK_PPM_EMA_ALPHA          0.2f
 // Below this residual while Locked, keep PPS-only advance (no NMEA re-anchor).
 #define CLK_LOCKED_SLEW_MS            5
+// ISR→task PPS queue (missed edges under WiFi load).
+#define GPS_PPS_ISR_QUEUE             8
+// Missed PPS seconds ≥ this → Unsynced (not silent catch-up only).
+#define CLK_PPS_MISS_UNSYNC           3
+// Holdover dispersion: floor crystal error (ppm) when EMA is still small.
+#define CLK_HOLDOVER_PPM_FLOOR       20.0f
+// Task panic (LED stale) for this long → soft restart.
+#define LED_TASK_PANIC_RESTART_MS 15000
+// Restart if free heap stays below this (fragmentation / leak).
+#define HEAP_RESTART_BYTES         10240
+#define HEAP_RESTART_SAMPLES            5
 

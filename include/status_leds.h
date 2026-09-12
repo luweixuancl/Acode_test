@@ -15,4 +15,5 @@ class StatusLeds {
   static bool tasksStale(uint32_t nowMs);
 
   uint32_t lastUpdateMs_ = 0;
+  uint32_t panicSinceMs_ = 0;
 };

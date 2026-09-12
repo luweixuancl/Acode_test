@@ -43,7 +43,7 @@ Connected --DISC--> armed
   连续失败 ≥5 或累计 >2min → SoftAP 逃生（`NTP-Setup-XXXX`）
 ```
 
-手动 Connect / Scan 会 `cancelAutoReconnect()`，以用户操作为准。
+手动 Connect 会 `cancelAutoReconnect()`；Scan 不取消（扫描与 STA 重连可并行）。
 
 常量见 `config.h`：`WIFI_RECONNECT_*`。
 

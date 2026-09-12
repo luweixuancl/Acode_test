@@ -105,6 +105,7 @@ class WifiManager {
   bool expectLink_ = false;
 
   WifiScanState scanState_ = WifiScanState::Idle;
+  uint32_t scanStartedMs_ = 0;
   std::vector<WifiNetwork> lastScan_;
 
   WifiProbeState probeState_ = WifiProbeState::Idle;

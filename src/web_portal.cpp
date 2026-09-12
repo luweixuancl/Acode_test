@@ -392,6 +392,8 @@ void WebPortal::handleStatus() {
   doc["rssi"] = WiFi.RSSI();
   doc["mac"] = wifi_->macAddress();
   doc["uptimeSec"] = millis() / 1000;
+  doc["freeHeap"] = ESP.getFreeHeap();
+  doc["minFreeHeap"] = ESP.getMinFreeHeap();
 
   AnomalyPolicy apol = AnomalyPolicy::Refuse;
   uint16_t hold = 0;

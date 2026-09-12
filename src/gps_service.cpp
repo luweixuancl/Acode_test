@@ -2,21 +2,29 @@
 #include <esp_timer.h>
 
 portMUX_TYPE GpsService::ppsMux_ = portMUX_INITIALIZER_UNLOCKED;
-volatile uint32_t GpsService::ppsMillis_ = 0;
 volatile uint32_t GpsService::ppsCount_ = 0;
-volatile uint64_t GpsService::ppsEdgeUs_ = 0;
-volatile bool GpsService::ppsFlag_ = false;
+volatile uint64_t GpsService::ppsLastEdgeUs_ = 0;
+volatile uint8_t GpsService::ppsQHead_ = 0;
+volatile uint8_t GpsService::ppsQTail_ = 0;
+volatile GpsService::PpsIsrEdge GpsService::ppsQ_[GPS_PPS_ISR_QUEUE] = {};
 TaskHandle_t GpsService::timeTask_ = nullptr;
 
 void IRAM_ATTR GpsService::onPpsIsr() {
   const uint64_t edgeUs = esp_timer_get_time();
-  const uint32_t nowMs = millis();
   portENTER_CRITICAL_ISR(&ppsMux_);
-  ppsEdgeUs_ = edgeUs;
-  ppsMillis_ = nowMs;
-  ppsCount_++;
-  ppsFlag_ = true;
+  const uint32_t count = ++ppsCount_;
+  ppsLastEdgeUs_ = edgeUs;
+
+  const uint8_t next = static_cast<uint8_t>((ppsQHead_ + 1) % GPS_PPS_ISR_QUEUE);
+  if (next == ppsQTail_) {
+    // Drop oldest so newest edges survive under load.
+    ppsQTail_ = static_cast<uint8_t>((ppsQTail_ + 1) % GPS_PPS_ISR_QUEUE);
+  }
+  ppsQ_[ppsQHead_].edgeUs = edgeUs;
+  ppsQ_[ppsQHead_].count = count;
+  ppsQHead_ = next;
   portEXIT_CRITICAL_ISR(&ppsMux_);
+
   BaseType_t woken = pdFALSE;
   if (timeTask_ != nullptr) {
     vTaskNotifyGiveFromISR(timeTask_, &woken);
@@ -32,27 +40,36 @@ void GpsService::begin() {
   gpsSerial_.setRxBufferSize(2048);
   gpsSerial_.begin(GPS_UART_BAUD, SERIAL_8N1, PIN_GPS_RX, PIN_GPS_TX);
   attachInterrupt(digitalPinToInterrupt(PIN_GPS_PPS), onPpsIsr, RISING);
-  Serial.printf("GPS UART%d RX=%d TX=%d baud=%d buf=2048 local-clock=on\n", GPS_UART_NUM,
-                PIN_GPS_RX, PIN_GPS_TX, GPS_UART_BAUD);
+  Serial.printf("GPS UART%d RX=%d TX=%d baud=%d buf=2048 local-clock=on ppsQ=%d\n", GPS_UART_NUM,
+                PIN_GPS_RX, PIN_GPS_TX, GPS_UART_BAUD, GPS_PPS_ISR_QUEUE);
 }
 
 void GpsService::loop(AnomalyPolicy policy, uint16_t holdoverSec) {
   parseNmea();
 
-  bool gotPps = false;
-  uint64_t edgeUs = 0;
-  uint32_t count = 0;
-  portENTER_CRITICAL(&ppsMux_);
-  if (ppsFlag_) {
-    ppsFlag_ = false;
-    edgeUs = ppsEdgeUs_;
-    count = ppsCount_;
-    gotPps = true;
-  }
-  portEXIT_CRITICAL(&ppsMux_);
-  if (gotPps) {
+  // Drain every queued PPS edge (WiFi may delay task-time by >1s).
+  uint32_t drainedCount = 0;
+  for (;;) {
+    uint64_t edgeUs = 0;
+    uint32_t count = 0;
+    bool got = false;
+    portENTER_CRITICAL(&ppsMux_);
+    if (ppsQTail_ != ppsQHead_) {
+      edgeUs = ppsQ_[ppsQTail_].edgeUs;
+      count = ppsQ_[ppsQTail_].count;
+      ppsQTail_ = static_cast<uint8_t>((ppsQTail_ + 1) % GPS_PPS_ISR_QUEUE);
+      got = true;
+    }
+    portEXIT_CRITICAL(&ppsMux_);
+    if (!got) {
+      break;
+    }
     ppsSeen_ = true;
+    drainedCount = count;
     localClock_.onPpsEdge(edgeUs, count);
+  }
+  if (drainedCount != 0) {
+    lastDrainedPpsCount_ = drainedCount;
   }
 
   GpsStatus work;
@@ -135,7 +152,7 @@ void GpsService::loop(AnomalyPolicy policy, uint16_t holdoverSec) {
 
 void GpsService::commitNmeaTime(uint32_t epochSec, AnomalyPolicy policy, uint16_t holdoverSec) {
   commitEpoch_ = epochSec;
-  commitPpsCount_ = ppsCount_;
+  commitPpsCount_ = lastDrainedPpsCount_ != 0 ? lastDrainedPpsCount_ : ppsCount_;
   commitMs_ = millis();
   haveCommit_ = true;
   localClock_.onNmeaCommit(epochSec, commitPpsCount_, policy, holdoverSec);
@@ -167,10 +184,15 @@ GpsStatus GpsService::snapshot() const {
 }
 
 bool GpsService::ppsFresh() const {
-  if (ppsMillis_ == 0) {
+  uint64_t edge = 0;
+  portENTER_CRITICAL(&ppsMux_);
+  edge = ppsLastEdgeUs_;
+  portEXIT_CRITICAL(&ppsMux_);
+  if (edge == 0) {
     return false;
   }
-  return (millis() - ppsMillis_) < 1500;
+  const uint64_t now = esp_timer_get_time();
+  return (now >= edge) && ((now - edge) < 1500000ULL);
 }
 
 uint32_t GpsService::qualityMs() const {

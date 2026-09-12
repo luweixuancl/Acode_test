@@ -48,7 +48,8 @@ Do not hardcode pins in `.cpp`; use `config.h` macros.
 - GPS owns `LocalClock`: PPS edges via `esp_timer`, ppm EMA, LocalUtc extrapolation; NMEA residual cross-check (warn 50 ms / fail 100 ms). States ACQ/LCK/DEG/HLD/UNS. `nowUtc()` serves NTP only from Locked/Degraded/Holdover.
 - AnomalyPolicy in NVS (`apol`/`ahold`): Refuse / HoldoverShort(30s) / HoldoverLong(300s); OLED Anomaly Mode + Web `/setup`.
 - NTP honest metadata: unsync → LI=3/stratum 16/refid `INIT`; Locked/Degraded LI=0; Holdover LI=1; sync only LCK/DEG/HLD; PPS ready → precision -10; dispersion from `qualityMs`.
-- SoftAP `NTP-Setup-XXXX` / `12345678` when not on STA (or menu Web Setup). HTTP `/` status, `/setup` WiFi+policy, `/status` JSON (`clock`/`residualMs`/`anomalyPolicy`).
+- SoftAP `NTP-Setup-XXXX` / `12345678` when not on STA (or menu Web Setup). HTTP `/` status, `/setup` WiFi+policy, `/status` JSON (`clock`/`residualMs`/`anomalyPolicy`/`freeHeap`).
+- Stability: PPS ISR queue drains multi-edges; task-net/ui on TWDT + LED-stale soft-restart; scan does not cancel STA reconnect; Holdover dispersion uses ppm×age; NVS `ver`/`crc` guards settings.
 - `WifiManager`: `WiFi.onEvent` only sets flags/logs; `task-net` consumes GOT_IP/DISC/SCAN_DONE. Connect success prefers GOT_IP (fallback WL_CONNECTED+IP). STA drop → backoff auto-reconnect (`WIFI_RECONNECT_*`, NVS `arec` default on); give-up opens SoftAP. Scan results cached in `lastScan_` for OLED + `/scan`.
 - `task-net` polls STA connect / WiFi scan / ARP conflict without blocking; HTTP `handleClient` keeps running during join/scan.
 - Design: `docs/local_clock_gps_check.md`, `docs/wifi_event_fsm.md`, `docs/ntp_cmp_test_20260911.md`.
