@@ -8,7 +8,7 @@ class EncoderInput {
   void begin();
   void loop();
 
-  // Consumes queued rotation: -1 / 0 / +1
+  // Consumes one smoothed detent tick: -1 / 0 / +1
   int8_t consumeRotate();
   bool consumeClick();
   bool consumeLongPress();
@@ -16,9 +16,13 @@ class EncoderInput {
  private:
   static void IRAM_ATTR onEncIsr();
   void sampleButton();
+  void drainRawToFilter();
 
   static volatile int16_t rotateAccum_;
   static volatile uint8_t abState_;  // bit1=A, bit0=B
+  int16_t filtAccum_ = 0;
+  uint32_t lastMotionMs_ = 0;
+  uint32_t lastEmitMs_ = 0;
   bool btnDown_ = false;
   bool clickPending_ = false;
   bool longPending_ = false;

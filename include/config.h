@@ -27,6 +27,11 @@
 #define PIN_ENC_A            2
 #define PIN_ENC_B            3
 #define PIN_ENC_SW           5
+// Soft layer (task-ui): one detent ≈ 4 quadrature edges; leftover bounce is dropped.
+#define ENC_DETENT_STEPS            4
+#define ENC_IDLE_CLEAR_MS          80   // rest this long → clear sub-detent remainder
+#define ENC_MIN_STEP_MS            50   // min gap between UI ticks (smooth, not bursty)
+#define ENC_ISR_DEBOUNCE_US       250   // ISR edge floor; Gray table rejects 2-bit jumps
 
 // On-board LEDs on 合宙 CORE ESP32 (datasheet 表4-1): D4=IO12, D5=IO13, active HIGH
 #define PIN_LED_D4          12   // D4 RUN / WiFi

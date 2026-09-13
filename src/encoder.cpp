@@ -4,8 +4,8 @@
 volatile int16_t EncoderInput::rotateAccum_ = 0;
 volatile uint8_t EncoderInput::abState_ = 0;
 
-// ISR-safe debounce (µs). Mechanical KY-040 bounce is typically <1 ms.
-static constexpr uint32_t kEncDebounceUs = 1000;
+// ISR-safe edge floor (µs). Finer filtering is in drainRawToFilter / consumeRotate.
+static constexpr uint32_t kEncDebounceUs = ENC_ISR_DEBOUNCE_US;
 
 // Quadrature transition table indexed by (prev<<2)|curr; values -1/0/+1.
 // prev/curr are 2-bit Gray codes: bit1=A, bit0=B.
@@ -60,6 +60,32 @@ void EncoderInput::begin() {
 
 void EncoderInput::loop() {
   sampleButton();
+  drainRawToFilter();
+}
+
+void EncoderInput::drainRawToFilter() {
+  noInterrupts();
+  const int16_t raw = rotateAccum_;
+  rotateAccum_ = 0;
+  interrupts();
+
+  const uint32_t now = millis();
+  if (raw != 0) {
+    int32_t next = static_cast<int32_t>(filtAccum_) + raw;
+    if (next > 32000) {
+      next = 32000;
+    } else if (next < -32000) {
+      next = -32000;
+    }
+    filtAccum_ = static_cast<int16_t>(next);
+    lastMotionMs_ = now;
+    return;
+  }
+  if (filtAccum_ != 0 &&
+      static_cast<int32_t>(now - lastMotionMs_) >= static_cast<int32_t>(ENC_IDLE_CLEAR_MS) &&
+      abs(filtAccum_) < ENC_DETENT_STEPS) {
+    filtAccum_ = 0;
+  }
 }
 
 void EncoderInput::sampleButton() {
@@ -82,17 +108,33 @@ void EncoderInput::sampleButton() {
 }
 
 int8_t EncoderInput::consumeRotate() {
-  noInterrupts();
-  int16_t v = rotateAccum_;
-  rotateAccum_ = 0;
-  interrupts();
-  if (v > 0) {
+  const int16_t th = static_cast<int16_t>(ENC_DETENT_STEPS);
+  if (filtAccum_ < th && filtAccum_ > -th) {
+    return 0;
+  }
+
+  const uint32_t now = millis();
+  const bool fastSpin = abs(filtAccum_) >= (th * 2);
+  if (!fastSpin && lastEmitMs_ != 0 &&
+      static_cast<int32_t>(now - lastEmitMs_) < static_cast<int32_t>(ENC_MIN_STEP_MS)) {
+    return 0;
+  }
+
+  if (filtAccum_ >= th) {
+    filtAccum_ = static_cast<int16_t>(filtAccum_ - th);
+    if (!fastSpin && abs(filtAccum_) < th) {
+      filtAccum_ = 0;
+    }
+    lastEmitMs_ = now;
     return 1;
   }
-  if (v < 0) {
-    return -1;
+
+  filtAccum_ = static_cast<int16_t>(filtAccum_ + th);
+  if (!fastSpin && abs(filtAccum_) < th) {
+    filtAccum_ = 0;
   }
-  return 0;
+  lastEmitMs_ = now;
+  return -1;
 }
 
 bool EncoderInput::consumeClick() {

@@ -64,7 +64,7 @@ Do not hardcode pins in `.cpp`; use `config.h` macros.
 ## Conventions
 
 - Arduino C++11-ish: `#pragma once`, classes with `begin()`/`loop()`, trailing underscore members.
-- ISRs (`IRAM_ATTR`): PPS plus encoder A **and** B (CHANGE). Keep them short; share state via `volatile`. Encoder uses `esp_timer_get_time()` debounce (no `millis()` in ISR); rotate is consumed with `noInterrupts()`.
+- ISRs (`IRAM_ATTR`): PPS plus encoder A **and** B (CHANGE). Keep them short; share state via `volatile`. Encoder ISR only counts Gray-code edges (`esp_timer` floor `ENC_ISR_DEBOUNCE_US`, no `millis()`). `task-ui` applies a detent filter (`ENC_DETENT_STEPS`=4, idle clear, min step gap) so one KY-040 click → one UI tick.
 - LEDs: HIGH = on. D4: AP ~4 Hz, no STA ~1 Hz, STA heartbeat (~900/100 ms). D5: off / ACQ blink / HLD fast blink / LCK·DEG heartbeat. Alternate panic blink if any task kick goes stale (~3 s).
 - Settings persist with `Preferences` keys: `ssid`, `pass`, `static`, `ip`, `gw`, `mask`, `dns`, `tz`, `apol`, `ahold`, `arec` (auto-reconnect, default true), `appw`, `webpw`, `aclm`/`acln`/`acl*`, `tcmp`/`tcpc`. Default timezone +8; anomaly Refuse; ACL Off; temp-comp Off.
 - Libs: ArduinoJson 7, Adafruit SH110X/GFX, TinyGPSPlus — versions pinned in `platformio.ini`.
