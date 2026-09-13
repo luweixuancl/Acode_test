@@ -16,6 +16,7 @@ class WebPortal {
 
  private:
   void handleRoot();
+  void handleSetupEntry();
   void handleSetup();
   void handleLogin();
   void handleLogout();
@@ -23,8 +24,8 @@ class WebPortal {
   void handleSave();
   void handleStatus();
   void handleMetrics();
-  bool isAuthorized();
-  bool requireWriteAuth();
+  bool sessionCookieOk();
+  bool requireSession(bool htmlLogin);
   void sendLoginPage(const char* err);
   void issueSession();
   String writePassword() const;

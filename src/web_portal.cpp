@@ -75,7 +75,11 @@ void WebPortal::begin(WifiManager* wifi, GpsService* gps, NtpServer* ntp) {
   server_.collectHeaders(hdrs, 1);
 
   server_.on("/", HTTP_GET, [this]() { handleRoot(); });
-  server_.on("/setup", HTTP_GET, [this]() { handleSetup(); });
+  server_.on("/setup", HTTP_GET, [this]() { handleSetupEntry(); });
+  server_.on("/setup/", HTTP_GET, [this]() { handleSetupEntry(); });
+  server_.on("/cfg", HTTP_GET, [this]() { handleSetup(); });
+  server_.on("/cfg/", HTTP_GET, [this]() { handleSetup(); });
+  server_.on("/login", HTTP_GET, [this]() { sendLoginPage(""); });
   server_.on("/login", HTTP_POST, [this]() { handleLogin(); });
   server_.on("/logout", HTTP_GET, [this]() { handleLogout(); });
   server_.on("/scan", HTTP_GET, [this]() { handleScan(); });
@@ -83,9 +87,11 @@ void WebPortal::begin(WifiManager* wifi, GpsService* gps, NtpServer* ntp) {
   server_.on("/status", HTTP_GET, [this]() { handleStatus(); });
   server_.on("/metrics", HTTP_GET, [this]() { handleMetrics(); });
   server_.onNotFound([this]() {
+    sendNoCache();
     const bool apUp = (WiFi.getMode() == WIFI_AP || WiFi.getMode() == WIFI_AP_STA);
+    // Captive probes must not land on settings HTML. SoftAP → login; STA → status.
     if (apUp && wifi_ && !wifi_->isStaConnected()) {
-      server_.sendHeader("Location", String("http://") + WiFi.softAPIP().toString() + "/", true);
+      server_.sendHeader("Location", "/login", true);
       server_.send(302, "text/plain", "");
       return;
     }
@@ -94,7 +100,7 @@ void WebPortal::begin(WifiManager* wifi, GpsService* gps, NtpServer* ntp) {
   });
   server_.begin();
   started_ = true;
-  Serial.println("HTTP on :80  (/status /metrics open; /setup needs login)");
+  Serial.println("HTTP on :80  (/ and /status /metrics open; /cfg needs login)");
 }
 
 void WebPortal::loop() {
@@ -138,45 +144,45 @@ void WebPortal::issueSession() {
            static_cast<unsigned>(esp_random()));
   sessionToken_ = tok;
   sessionUntilMs_ = millis() + 30UL * 60UL * 1000UL;
-  String cookie = String("ntp_sess=") + sessionToken_ + "; Path=/; HttpOnly; SameSite=Lax";
+  String cookie = String("ntp_sess=") + sessionToken_ +
+                  "; Path=/; Max-Age=1800; HttpOnly; SameSite=Lax";
   server_.sendHeader("Set-Cookie", cookie);
 }
 
-bool WebPortal::isAuthorized() {
-  if (!sessionToken_.isEmpty() && sessionUntilMs_ != 0 &&
-      static_cast<int32_t>(millis() - sessionUntilMs_) < 0) {
-    const String cookie = server_.header("Cookie");
-    if (cookie.indexOf(String("ntp_sess=") + sessionToken_) >= 0) {
-      return true;
+bool WebPortal::sessionCookieOk() {
+  if (sessionToken_.isEmpty() || sessionUntilMs_ == 0) {
+    return false;
+  }
+  if (static_cast<int32_t>(millis() - sessionUntilMs_) >= 0) {
+    return false;
+  }
+  const String cookie = server_.header("Cookie");
+  const String needle = String("ntp_sess=") + sessionToken_;
+  const int pos = cookie.indexOf(needle);
+  if (pos < 0) {
+    return false;
+  }
+  if (pos > 0) {
+    const char prev = cookie[pos - 1];
+    if (prev != ' ' && prev != ';') {
+      return false;
     }
   }
-  const String expect = writePassword();
-  if (!expect.isEmpty() && server_.authenticate("admin", expect.c_str())) {
-    return true;
+  const int end = pos + needle.length();
+  if (end < static_cast<int>(cookie.length())) {
+    const char next = cookie[end];
+    if (next != ';' && next != ' ') {
+      return false;
+    }
   }
-  return false;
+  return true;
 }
 
-bool WebPortal::requireWriteAuth() {
-  if (isAuthorized()) {
+bool WebPortal::requireSession(bool htmlLogin) {
+  if (sessionCookieOk()) {
     return true;
   }
-  if (server_.method() == HTTP_POST) {
-    const String expect = writePassword();
-    JsonDocument doc;
-    if (!deserializeJson(doc, server_.arg("plain"))) {
-      const char* got = doc["auth"].is<const char*>() ? doc["auth"].as<const char*>() : "";
-      if (got != nullptr && !expect.isEmpty() && expect == String(got)) {
-        return true;
-      }
-    }
-    const String form = server_.arg("password");
-    if (!form.isEmpty() && form == writePassword()) {
-      issueSession();
-      return true;
-    }
-  }
-  if (server_.method() == HTTP_GET) {
+  if (htmlLogin && server_.method() == HTTP_GET) {
     sendLoginPage("");
     return false;
   }
@@ -190,7 +196,9 @@ void WebPortal::sendLoginPage(const char* err) {
   String body;
   body += F("<h1>NTP 设置登录</h1>"
             "<div class='card'>"
-            "<p>输入配置口令后才能进入设置（默认与 SoftAP 相同，见串口 <code>SoftAP default pass=</code> 或 OLED）。</p>");
+            "<p>输入配置口令后才能进入设置。口令默认与 SoftAP 相同"
+            "（串口 <code>SoftAP default pass=</code> 或 OLED）。"
+            "登录后设置页不再要求填写写口令。</p>");
   if (err && err[0]) {
     body += F("<p class='bad'>");
     body += err;
@@ -211,7 +219,7 @@ void WebPortal::handleLogin() {
   if (!pass.isEmpty() && !expect.isEmpty() && pass == expect) {
     issueSession();
     sendNoCache();
-    server_.sendHeader("Location", "/setup", true);
+    server_.sendHeader("Location", "/cfg", true);
     server_.send(302, "text/plain", "");
     return;
   }
@@ -223,15 +231,26 @@ void WebPortal::handleLogout() {
   sessionUntilMs_ = 0;
   sendNoCache();
   server_.sendHeader("Set-Cookie", "ntp_sess=; Path=/; Max-Age=0");
-  server_.sendHeader("Location", "/setup", true);
+  server_.sendHeader("Location", "/login", true);
   server_.send(302, "text/plain", "");
+}
+
+void WebPortal::handleSetupEntry() {
+  sendNoCache();
+  if (sessionCookieOk()) {
+    server_.sendHeader("Location", "/cfg", true);
+    server_.send(302, "text/plain", "");
+    return;
+  }
+  sendLoginPage("");
 }
 
 String WebPortal::buildPage(const String& title, const String& body, bool refresh) const {
   String html;
   html.reserve(body.length() + 700);
   html += F("<!DOCTYPE html><html><head><meta charset='utf-8'>"
-            "<meta name='viewport' content='width=device-width,initial-scale=1'>");
+            "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+            "<meta http-equiv='Cache-Control' content='no-store'>");
   if (refresh) {
     html += F("<meta http-equiv='refresh' content='2'>");
   }
@@ -252,14 +271,13 @@ String WebPortal::buildPage(const String& title, const String& body, bool refres
 }
 
 void WebPortal::handleRoot() {
-  if (!wifi_->isStaConnected()) {
-    handleSetup();
-    return;
-  }
+  // `/` is always the read-only status page (SoftAP and STA). Settings live at /cfg
+  // after login — never serve that HTML here (also busts old cached SoftAP `/` setup).
+  sendNoCache();
 
   // Static shell; live values filled by JS polling /status (no full-page refresh).
   String body = F(
-      "<h1>GNSS NTP 状态</h1><p><a href='/setup'>设置</a></p>"
+      "<h1>GNSS NTP 状态</h1><p><a href='/cfg'>设置（需登录）</a></p>"
       "<div class='card'>"
       "<div class='row'><span class='k'>NTP</span><span class='v' id='ntpState'>--</span></div>"
       "<div class='row'><span class='k'>时钟</span><span class='v' id='clk'>--</span></div>"
@@ -334,7 +352,7 @@ void WebPortal::handleRoot() {
 }
 
 void WebPortal::handleSetup() {
-  if (!requireWriteAuth()) {
+  if (!requireSession(true)) {
     return;
   }
   uint8_t apol = 0;
@@ -361,7 +379,8 @@ void WebPortal::handleSetup() {
   }
   String body;
   body.reserve(5600);
-  body += F("<h1>NTP 设置</h1><p><a href='/'>返回状态</a> · <a href='/logout'>退出</a></p>");
+  body += F("<!-- ntp-cfg-v2 -->"
+            "<h1>NTP 设置</h1><p><a href='/'>返回状态</a> · <a href='/logout'>退出</a></p>");
   if (haveSaved) {
     body += F("<div class='card'><h2 style='font-size:1rem;margin:0 0 8px'>已保存的 WiFi</h2><p>SSID: <b>");
     body += savedSsid;
@@ -409,14 +428,19 @@ void WebPortal::handleSetup() {
             "<button type='button' onclick='saveWifi()'>连接</button>"
             "<p id='msg'></p></div>");
   body += F("<script>"
-            "function authBody(extra){return Object.assign({},extra||{});}"
             "async function sleep(ms){return new Promise(r=>setTimeout(r,ms));}"
+            "async function postSave(obj){"
+            " const r=await fetch('/save',{method:'POST',credentials:'same-origin',"
+            "  headers:{'Content-Type':'application/json'},body:JSON.stringify(obj)});"
+            " if(r.status===401){location.href='/login';return '';}"
+            " return r.text();}"
             "async function scan(){"
             " try{"
             " document.getElementById('msg').textContent='Scanning...';"
             " let j=null;"
             " for(let i=0;i<50;i++){"
             "  const r=await fetch('/scan',{credentials:'same-origin'});"
+            "  if(r.status===401){location.href='/login';return;}"
             "  if(r.status===202){await sleep(250);continue;}"
             "  if(!r.ok){document.getElementById('msg').textContent='Scan failed';return;}"
             "  j=await r.json(); break;"
@@ -432,27 +456,18 @@ void WebPortal::handleSetup() {
             " try{"
             " const ssid=document.getElementById('ssid').value;"
             " const pass=document.getElementById('pass').value;"
-            " const body=JSON.stringify(authBody({ssid,pass}));"
-            " const r=await fetch('/save',{method:'POST',credentials:'same-origin',"
-            "  headers:{'Content-Type':'application/json'},body});"
-            " document.getElementById('msg').textContent=await r.text();"
+            " document.getElementById('msg').textContent=await postSave({ssid,pass});"
             " }catch(e){document.getElementById('msg').textContent=String(e);}"
             "}"
             "async function reconnectSaved(){"
             " try{"
-            "  const r=await fetch('/save',{method:'POST',credentials:'same-origin',"
-            "   headers:{'Content-Type':'application/json'},"
-            "   body:JSON.stringify(authBody({reconnectSaved:true}))});"
-            "  document.getElementById('rmsg').textContent=await r.text();"
+            "  document.getElementById('rmsg').textContent=await postSave({reconnectSaved:true});"
             " }catch(e){document.getElementById('rmsg').textContent=String(e);}"
             "}"
             "async function savePolicy(){"
             " try{"
             " const anomalyPolicy=parseInt(document.getElementById('apol').value,10);"
-            " const body=JSON.stringify(authBody({anomalyPolicy}));"
-            " const r=await fetch('/save',{method:'POST',credentials:'same-origin',"
-            "  headers:{'Content-Type':'application/json'},body});"
-            " document.getElementById('pmsg').textContent=await r.text();"
+            " document.getElementById('pmsg').textContent=await postSave({anomalyPolicy});"
             " }catch(e){document.getElementById('pmsg').textContent=String(e);}"
             "}"
             "async function saveAcl(){"
@@ -460,20 +475,14 @@ void WebPortal::handleSetup() {
             " const ntpAclMode=parseInt(document.getElementById('aclm').value,10);"
             " const ntpAcl=document.getElementById('acllist').value.split(/\\r?\\n/)"
             "  .map(s=>s.trim()).filter(s=>s.length>0);"
-            " const body=JSON.stringify(authBody({ntpAclMode,ntpAcl}));"
-            " const r=await fetch('/save',{method:'POST',credentials:'same-origin',"
-            "  headers:{'Content-Type':'application/json'},body});"
-            " document.getElementById('amsg').textContent=await r.text();"
+            " document.getElementById('amsg').textContent=await postSave({ntpAclMode,ntpAcl});"
             " }catch(e){document.getElementById('amsg').textContent=String(e);}"
             "}"
             "async function saveTemp(){"
             " try{"
             " const tempComp=parseInt(document.getElementById('tcmp').value,10)===1;"
             " const tempCoeff=parseFloat(document.getElementById('tcpc').value);"
-            " const body=JSON.stringify(authBody({tempComp,tempCoeff}));"
-            " const r=await fetch('/save',{method:'POST',credentials:'same-origin',"
-            "  headers:{'Content-Type':'application/json'},body});"
-            " document.getElementById('tmsg').textContent=await r.text();"
+            " document.getElementById('tmsg').textContent=await postSave({tempComp,tempCoeff});"
             " }catch(e){document.getElementById('tmsg').textContent=String(e);}"
             "}"
             "document.getElementById('apol').value='");
@@ -511,7 +520,7 @@ void WebPortal::handleSetup() {
 }
 
 void WebPortal::handleScan() {
-  if (!requireWriteAuth()) {
+  if (!requireSession(false)) {
     return;
   }
   if (wifi_ == nullptr) {
@@ -553,7 +562,7 @@ void WebPortal::handleScan() {
 }
 
 void WebPortal::handleSave() {
-  if (!requireWriteAuth()) {
+  if (!requireSession(false)) {
     return;
   }
   String body = server_.arg("plain");
@@ -797,7 +806,6 @@ void WebPortal::handleStatus() {
   doc["holdoverSec"] = hold;
   doc["savedSsid"] = savedSsid;
   doc["hasSavedWifi"] = !savedSsid.isEmpty();
-  doc["softApPasswordDefault"] = derivedSoftApPassword();
   doc["ntpAclMode"] = static_cast<uint8_t>(aclMode);
   doc["ntpAclLabel"] = ntpAclModeMenuLabel(aclMode);
   doc["tempComp"] = tcmp;
@@ -853,6 +861,7 @@ void WebPortal::handleStatus() {
 
   String out;
   serializeJson(doc, out);
+  sendNoCache();
   server_.send(200, "application/json", out);
 }
 

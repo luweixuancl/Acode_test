@@ -9,8 +9,8 @@
 3. **旋转编码器菜单**：扫描 WiFi、网页配网、静态 IP、DHCP、时区、重启
 4. **手动静态 IP**：编码器逐字节编辑；保存时通过 **ARP 探测**检测局域网是否已有相同 IP
 5. **编码器配网**：扫描附近 WiFi → 选择 SSID → 编码器输入密码 → 连接
-6. **网页配网**：开启 SoftAP（`NTP-Setup-XXXX` / 密码默认 **`NTP-`+MAC 后 4 位十六进制**，与串口打印的 MAC 对应；**仅 2.4 GHz**）。`/setup`（SoftAP 下 `/` 也是设置入口）先显示**登录页**，口令对了才进入设置；设置页不再要求再次填写写口令。`/status` `/metrics` 只读开放。STA 已连接时 `/` 为状态页。
-7. **网页状态**：STA 连上后访问 `http://<设备IP>/` 查看 NTP/GPS/PPS（JS 按 1 Hz 轮询 `/status`，无需整页刷新）；点「设置」进入需登录的 `/setup`
+6. **网页配网**：开启 SoftAP（`NTP-Setup-XXXX` / 密码默认 **`NTP-`+MAC 后 4 位十六进制**，与串口打印的 MAC 对应；**仅 2.4 GHz**）。`/` 始终是只读状态页。打开 `/setup` 或 `/login` 先登录，通过后才进入 `/cfg` 设置；设置页不再出现写口令输入框。`/status` `/metrics` 只读开放。若手机仍显示旧设置页，请强制刷新（缓存了刷固件前的 `/`）。
+7. **网页状态**：访问 `http://<设备IP>/` 查看 NTP/GPS/PPS（JS 按 1 Hz 轮询 `/status`，无需整页刷新）；点「设置」进入登录后再到 `/cfg`
 8. **FreeRTOS 三任务**：`task-time`(5) 独占 GNSS/NTP，`task-net`(2) 管 WiFi/网页，`task-ui`(1) 管 OLED/编码器/LED；PPS 计数对齐避免 NMEA 迟到导致的整秒跳变
 9. **WiFi 事件 + 自动重连**：`GOT_IP`/`DISC`/`SCAN_DONE` 驱动状态机；掉线后退避重连（默认开，NVS `arec`）；多次失败后开 SoftAP 逃生。本板为 **C3 单核**，不做双核拆分（详见 `docs/wifi_event_fsm.md`）
 
@@ -90,7 +90,7 @@ D5（GNSS）：LCK/DEG 心跳；Holdover 快闪；ACQ 慢闪；UNS/无星灭。D
 1. **仅 2.4 GHz**：SoftAP 与 STA 都只支持 2.4G；手机若只看 5G 会扫不到 `NTP-Setup-XXXX`。
 2. **限流（B1）**：每 IP 约 4 req/s，超限 KoD `RATE`；持续超限 → `DENY` 冷静丢弃；全局约 32 pkt/s 静默丢弃，保护 `task-time`/PPS。
 3. **ACL（B3）**：默认 Off。需要更严时在 `/setup` 开 AllowList，只放行可信客户端 IP（最多 8 条）；空名单=拒绝全部。
-4. **管理面**：`/status` `/metrics` 只读开放；STA 下 `/` 为状态页。`/setup` `/save` `/scan` 需登录（口令默认 SoftAP `NTP-`+MAC 后 4 位，会话 Cookie 约 30 分钟）。
+4. **管理面**：`/` `/status` `/metrics` 只读开放。`/cfg` `/save` `/scan` 仅接受登录后的会话 Cookie（约 30 分钟）；`/setup` 只显示登录页。口令默认 SoftAP `NTP-`+MAC 后 4 位。设置页不要求再次填写写口令。
 5. **升级保配置**：只刷 `firmware.bin` @ `0x10000`，关闭全片擦除，以免清掉 NVS 里的 WiFi/口令/ACL。
 6. **观测**：OLED **NTP Stats**、串口约每 60s 一行 `[ntp] …` 摘要、或抓 `http://<ip>/metrics`。
 
