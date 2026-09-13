@@ -213,13 +213,26 @@ void WebPortal::handleRoot() {
 
 void WebPortal::handleSetup() {
   uint8_t apol = 0;
+  String savedSsid;
+  bool haveSaved = false;
   if (settingsLock(pdMS_TO_TICKS(50))) {
     apol = static_cast<uint8_t>(gSettings.anomalyPolicy);
+    savedSsid = gSettings.wifiSsid;
+    haveSaved = !savedSsid.isEmpty();
     settingsUnlock();
   }
   String body;
-  body.reserve(2200);
+  body.reserve(3200);
   body += F("<h1>NTP 设置</h1><p><a href='/'>返回状态</a></p>");
+  if (haveSaved) {
+    body += F("<div class='card'><h2 style='font-size:1rem;margin:0 0 8px'>已保存的 WiFi</h2><p>SSID: <b>");
+    body += savedSsid;
+    body += F("</b></p>"
+              "<p style='color:#64748b;font-size:.85rem'>固件更新后会自动重连；无需重新输入密码。"
+              "仅当路由器改密或换热点时才需要下方重新配网。</p>"
+              "<button onclick='reconnectSaved()'>使用已保存网络重连</button>"
+              "<p id='rmsg'></p></div>");
+  }
   body += F("<div class='card'><h2 style='font-size:1rem;margin:0 0 8px'>GPS 异常策略</h2>"
             "<select id='apol'>"
             "<option value='0'>立即拒绝授时 (Refuse)</option>"
@@ -259,6 +272,11 @@ void WebPortal::handleSetup() {
             " const r=await fetch('/save',{method:'POST',headers:{'Content-Type':'application/json'},body});"
             " document.getElementById('msg').textContent=await r.text();"
             "}"
+            "async function reconnectSaved(){"
+            " const r=await fetch('/save',{method:'POST',headers:{'Content-Type':'application/json'},"
+            "  body:JSON.stringify({reconnectSaved:true})});"
+            " document.getElementById('rmsg').textContent=await r.text();"
+            "}"
             "async function savePolicy(){"
             " const anomalyPolicy=parseInt(document.getElementById('apol').value,10);"
             " const body=JSON.stringify({anomalyPolicy});"
@@ -267,9 +285,11 @@ void WebPortal::handleSetup() {
             "}"
             "document.getElementById('apol').value='");
   body += String(apol);
-  body += F("';"
-            "scan();"
-            "</script>");
+  body += F("';");
+  if (!haveSaved) {
+    body += F("scan();");
+  }
+  body += F("</script>");
   server_.send(200, "text/html", buildPage("NTP 设置", body));
 }
 
@@ -317,6 +337,26 @@ void WebPortal::handleSave() {
   JsonDocument doc;
   if (deserializeJson(doc, body)) {
     server_.send(400, "text/plain", "Bad JSON");
+    return;
+  }
+
+  // Reuse NVS WiFi without retyping password (SoftAP escape / post-OTA).
+  if (doc["reconnectSaved"] == true) {
+    String ssid;
+    String pass;
+    if (settingsLock(pdMS_TO_TICKS(200))) {
+      ssid = gSettings.wifiSsid;
+      pass = gSettings.wifiPass;
+      settingsUnlock();
+    }
+    if (ssid.isEmpty()) {
+      server_.send(400, "text/plain", "No saved WiFi");
+      return;
+    }
+    pendingSsid_ = ssid;
+    pendingPass_ = pass;
+    pendingConnect_ = true;
+    server_.send(200, "text/plain", "Reconnecting with saved WiFi...");
     return;
   }
 
@@ -397,10 +437,12 @@ void WebPortal::handleStatus() {
 
   AnomalyPolicy apol = AnomalyPolicy::Refuse;
   uint16_t hold = 0;
+  String savedSsid;
   if (settingsLock(pdMS_TO_TICKS(20))) {
     doc["tzHours"] = gSettings.timezoneHours;
     apol = gSettings.anomalyPolicy;
     hold = gSettings.holdoverSec;
+    savedSsid = gSettings.wifiSsid;
     settingsUnlock();
   } else {
     doc["tzHours"] = 8;
@@ -408,6 +450,8 @@ void WebPortal::handleStatus() {
   doc["anomalyPolicy"] = static_cast<uint8_t>(apol);
   doc["anomalyLabel"] = anomalyPolicyMenuLabel(apol);
   doc["holdoverSec"] = hold;
+  doc["savedSsid"] = savedSsid;
+  doc["hasSavedWifi"] = !savedSsid.isEmpty();
 
   const GpsStatus st = gps_ ? gps_->snapshot() : GpsStatus{};
   JsonObject gps = doc["gps"].to<JsonObject>();

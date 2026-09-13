@@ -41,6 +41,7 @@ AppSettings SettingsStore::load() const {
   s.wifiPass = prefs_.getString("pass", "");
   // Repair corrupt creds from older Web savePolicy bug (JSON null → "null").
   if (s.wifiSsid == "null" || s.wifiSsid == "undefined") {
+    Serial.println("[settings] repair literal \"null\" SSID");
     s.wifiSsid = "";
     s.wifiPass = "";
   }
@@ -59,6 +60,9 @@ AppSettings SettingsStore::load() const {
   }
   const uint16_t defHold = anomalyPolicyDefaultHoldoverSec(s.anomalyPolicy);
   s.holdoverSec = static_cast<uint16_t>(prefs_.getUShort("ahold", defHold ? defHold : CLK_HOLDOVER_SHORT_SEC));
+  // Clamp for runtime use only AFTER CRC — mutating before CRC used to false-fail
+  // and wipe WiFi on upgrade / odd ahold values.
+  uint16_t holdRaw = s.holdoverSec;
   if (s.holdoverSec < 10) {
     s.holdoverSec = 10;
   }
@@ -69,15 +73,37 @@ AppSettings SettingsStore::load() const {
 
   const uint16_t ver = prefs_.getUShort("ver", 0);
   const uint32_t storedCrc = prefs_.getUInt("crc", 0);
-  if (ver == kSettingsVer && storedCrc != 0) {
-    const uint32_t calc = settingsCrc(s);
-    if (calc != storedCrc) {
-      Serial.printf("[settings] CRC mismatch stored=%08x calc=%08x — clear WiFi creds\n",
-                    static_cast<unsigned>(storedCrc), static_cast<unsigned>(calc));
-      s.wifiSsid = "";
-      s.wifiPass = "";
-      s.useStaticIp = false;
+  // CRC is integrity hint only. NEVER clear WiFi on mismatch — that forced SoftAP
+  // after OTA when the CRC recipe or clamping changed while ver stayed the same.
+  AppSettings forCrc = s;
+  forCrc.holdoverSec = holdRaw;
+  const uint32_t calc = settingsCrc(forCrc);
+  bool needRewrite = false;
+  if (ver != kSettingsVer) {
+    needRewrite = !s.wifiSsid.isEmpty() || storedCrc != 0 || ver != 0;
+    if (ver != 0) {
+      Serial.printf("[settings] ver %u → %u — keep WiFi, refresh CRC\n",
+                    static_cast<unsigned>(ver), static_cast<unsigned>(kSettingsVer));
     }
+  } else if (storedCrc != 0 && calc != storedCrc) {
+    needRewrite = true;
+    Serial.printf("[settings] CRC mismatch stored=%08x calc=%08x — keep WiFi, refresh CRC\n",
+                  static_cast<unsigned>(storedCrc), static_cast<unsigned>(calc));
+  } else if (storedCrc == 0 && !s.wifiSsid.isEmpty()) {
+    needRewrite = true;
+  }
+  if (needRewrite) {
+    // Persist clamped holdover + current CRC so the next boot is clean.
+    prefs_.putUShort("ahold", s.holdoverSec);
+    prefs_.putUShort("ver", kSettingsVer);
+    prefs_.putUInt("crc", settingsCrc(s));
+  }
+
+  if (s.wifiSsid.isEmpty()) {
+    Serial.println("[settings] no saved WiFi SSID (NVS empty or never configured)");
+  } else {
+    Serial.printf("[settings] loaded WiFi ssid=\"%s\" static=%d arec=%d\n", s.wifiSsid.c_str(),
+                  s.useStaticIp ? 1 : 0, s.autoReconnect ? 1 : 0);
   }
   return s;
 }

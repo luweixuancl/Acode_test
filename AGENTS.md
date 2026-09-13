@@ -48,7 +48,8 @@ Do not hardcode pins in `.cpp`; use `config.h` macros.
 - GPS owns `LocalClock`: PPS edges via `esp_timer`, ppm EMA, LocalUtc extrapolation; NMEA residual cross-check (warn 50 ms / fail 100 ms). States ACQ/LCK/DEG/HLD/UNS. `nowUtc()` serves NTP only from Locked/Degraded/Holdover.
 - AnomalyPolicy in NVS (`apol`/`ahold`): Refuse / HoldoverShort(30s) / HoldoverLong(300s); OLED Anomaly Mode + Web `/setup`.
 - NTP honest metadata: unsync → LI=3/stratum 16/refid `INIT`; Locked/Degraded/Holdover LI=0 (LI is leap-second only); sync only LCK/DEG/HLD; PPS ready → precision -10; Reference Timestamp = last PPS-aligned second; dispersion from `qualityMs` (holdover: entry + max(EMA,50ppm,PHI)×age, cap → UNS).
-- SoftAP `NTP-Setup-XXXX` / `12345678` when not on STA (or menu Web Setup). HTTP `/` status, `/setup` WiFi+policy, `/status` JSON (`clock`/`residualMs`/`anomalyPolicy`/`freeHeap`).
+- SoftAP `NTP-Setup-XXXX` / `12345678` when **no saved STA SSID** (or reconnect give-up / menu Web Setup). HTTP `/` status, `/setup` WiFi+policy (shows saved SSID + one-tap reconnect), `/status` JSON (`clock`/`residualMs`/`anomalyPolicy`/`savedSsid`/`freeHeap`).
+- Settings NVS: CRC mismatch **never clears WiFi** (only refreshes CRC); flash updates should write app @ `0x10000` without full-chip erase to keep NVS.
 - Stability: PPS ISR queue drains multi-edges; task-net/ui on TWDT + LED-stale soft-restart; scan does not cancel STA reconnect; Holdover dispersion uses ppm×age; NVS `ver`/`crc` guards settings.
 - `WifiManager`: `WiFi.onEvent` only sets flags/logs; `task-net` consumes GOT_IP/DISC/SCAN_DONE. Connect success prefers GOT_IP (fallback WL_CONNECTED+IP). STA drop → backoff auto-reconnect (`WIFI_RECONNECT_*`, NVS `arec` default on); give-up opens SoftAP. Scan results cached in `lastScan_` for OLED + `/scan`.
 - `task-net` polls STA connect / WiFi scan / ARP conflict without blocking; HTTP `handleClient` keeps running during join/scan.

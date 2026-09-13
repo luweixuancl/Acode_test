@@ -324,10 +324,11 @@ static void taskNet(void* /*arg*/) {
   if (!boot.wifiSsid.isEmpty()) {
     gBootNeedApIfFail = true;
     if (!gWifi.beginConnect(boot)) {
-      gWifi.startSetupAp();
-      gIpc.setupAp = true;
-      postUiText("AP setup mode");
-      gBootNeedApIfFail = false;
+      // Never open SoftAP just because begin was busy — keep trying saved WiFi.
+      gWifi.armReconnect(boot, WIFI_RECONNECT_BACKOFF_1_MS);
+      gPendingSta = boot;
+      postUiText("WiFi retry...");
+      Serial.println("[wifi] boot beginConnect deferred → reconnect armed (keep SoftAP off)");
     } else {
       gPendingSta = boot;
       gNetWork = NetWork::Connecting;
