@@ -1,5 +1,6 @@
 #include "display_ui.h"
 #include "app_ipc.h"
+#include "ntp_server.h"
 #include <Wire.h>
 #include <WiFi.h>
 
@@ -10,6 +11,7 @@ static const char* MENU_LABELS[] = {
     "Use DHCP",
     "Timezone",
     "Anomaly Mode",
+    "NTP Stats",
     "Restart",
 };
 
@@ -68,7 +70,7 @@ void DisplayUi::drainUiMessages() {
   }
 }
 
-void DisplayUi::loop(EncoderInput& enc, GpsService& gps, WifiManager& wifi) {
+void DisplayUi::loop(EncoderInput& enc, GpsService& gps, WifiManager& wifi, NtpServer& ntp) {
   drainUiMessages();
 
   int8_t rot = enc.consumeRotate();
@@ -96,6 +98,9 @@ void DisplayUi::loop(EncoderInput& enc, GpsService& gps, WifiManager& wifi) {
       break;
     case UiMode::SetAnomaly:
       handleAnomaly(rot, click, longPress);
+      break;
+    case UiMode::NtpStats:
+      handleNtpStats(rot, click, longPress);
       break;
     case UiMode::WebSetupHint:
       if (click || longPress) {
@@ -146,6 +151,9 @@ void DisplayUi::loop(EncoderInput& enc, GpsService& gps, WifiManager& wifi) {
       break;
     case UiMode::SetAnomaly:
       drawAnomaly(settings);
+      break;
+    case UiMode::NtpStats:
+      drawNtpStats(ntp);
       break;
     case UiMode::WebSetupHint:
       drawWebHint();
@@ -386,6 +394,27 @@ void DisplayUi::drawAnomaly(const AppSettings& settings) {
   display_.println("long=back");
 }
 
+void DisplayUi::drawNtpStats(const NtpServer& ntp) {
+  display_.setCursor(0, 0);
+  display_.println("NTP Stats");
+  display_.setCursor(0, 12);
+  display_.print("served ");
+  display_.println(ntp.servedCount());
+  display_.setCursor(0, 22);
+  display_.print("RATE   ");
+  display_.println(ntp.rateLimitedCount());
+  display_.setCursor(0, 32);
+  display_.print("DENY   ");
+  display_.println(ntp.deniedCount());
+  display_.setCursor(0, 42);
+  display_.print("drop   ");
+  display_.print(ntp.droppedCount());
+  display_.print(" c=");
+  display_.println(ntp.activeClientCount());
+  display_.setCursor(0, 56);
+  display_.print("click=back");
+}
+
 void DisplayUi::drawMessage() {
   display_.setCursor(0, 20);
   display_.println(message_);
@@ -466,6 +495,9 @@ void DisplayUi::handleMenu(int8_t rot, bool click, bool longPress) {
         settingsUnlock();
       }
       mode_ = UiMode::SetAnomaly;
+      break;
+    case MenuItem::NtpStats:
+      mode_ = UiMode::NtpStats;
       break;
     case MenuItem::Restart:
       ESP.restart();
@@ -629,5 +661,11 @@ void DisplayUi::handleAnomaly(int8_t rot, bool click, bool longPress) {
       gStore.save(copy);
     }
     showMessage(String("A:") + anomalyPolicyShortLabel(editPolicy_));
+  }
+}
+
+void DisplayUi::handleNtpStats(int8_t /*rot*/, bool click, bool longPress) {
+  if (click || longPress) {
+    mode_ = UiMode::Menu;
   }
 }

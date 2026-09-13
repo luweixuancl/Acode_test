@@ -394,7 +394,7 @@ static void taskUi(void* /*arg*/) {
     const GpsStatus st = gGps.snapshot();
     ipcKickUi();
     gLeds.loop(gIpc.setupAp, gWifi.isStaConnected(), st);
-    gUi.loop(gEnc, gGps, gWifi);
+    gUi.loop(gEnc, gGps, gWifi, gNtp);
     esp_task_wdt_reset();
     vTaskDelay(pdMS_TO_TICKS(10));
   }

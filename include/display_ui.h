@@ -10,6 +10,8 @@
 #include "wifi_manager.h"
 #include "encoder.h"
 
+class NtpServer;
+
 enum class UiMode : uint8_t {
   Home,
   Menu,
@@ -18,6 +20,7 @@ enum class UiMode : uint8_t {
   SetIp,
   SetTimezone,
   SetAnomaly,
+  NtpStats,
   WebSetupHint,
   Message,
 };
@@ -29,6 +32,7 @@ enum class MenuItem : uint8_t {
   UseDhcp,
   Timezone,
   AnomalyMode,
+  NtpStats,
   Restart,
   Count
 };
@@ -36,7 +40,7 @@ enum class MenuItem : uint8_t {
 class DisplayUi {
  public:
   void begin();
-  void loop(EncoderInput& enc, GpsService& gps, WifiManager& wifi);
+  void loop(EncoderInput& enc, GpsService& gps, WifiManager& wifi, NtpServer& ntp);
 
   void showMessage(const String& msg);
   void onScanResults(const std::vector<WifiNetwork>& nets);
@@ -49,6 +53,7 @@ class DisplayUi {
   void drawSetIp();
   void drawTimezone(const AppSettings& settings);
   void drawAnomaly(const AppSettings& settings);
+  void drawNtpStats(const NtpServer& ntp);
   void drawMessage();
   void drawWebHint();
 
@@ -59,6 +64,7 @@ class DisplayUi {
   void handleSetIp(int8_t rot, bool click, bool longPress);
   void handleTimezone(int8_t rot, bool click);
   void handleAnomaly(int8_t rot, bool click, bool longPress);
+  void handleNtpStats(int8_t rot, bool click, bool longPress);
   void drainUiMessages();
 
   Adafruit_SH1107 display_{OLED_WIDTH, OLED_HEIGHT, &Wire, -1};

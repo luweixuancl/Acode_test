@@ -20,6 +20,7 @@ class WebPortal {
   void handleScan();
   void handleSave();
   void handleStatus();
+  void handleMetrics();
   String buildPage(const String& title, const String& body, bool refresh = false) const;
 
   WebServer server_{80};

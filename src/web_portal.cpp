@@ -74,6 +74,7 @@ void WebPortal::begin(WifiManager* wifi, GpsService* gps, NtpServer* ntp) {
   server_.on("/scan", HTTP_GET, [this]() { handleScan(); });
   server_.on("/save", HTTP_POST, [this]() { handleSave(); });
   server_.on("/status", HTTP_GET, [this]() { handleStatus(); });
+  server_.on("/metrics", HTTP_GET, [this]() { handleMetrics(); });
   server_.onNotFound([this]() {
     const bool apUp = (WiFi.getMode() == WIFI_AP || WiFi.getMode() == WIFI_AP_STA);
     if (apUp && wifi_ && !wifi_->isStaConnected()) {
@@ -86,7 +87,7 @@ void WebPortal::begin(WifiManager* wifi, GpsService* gps, NtpServer* ntp) {
   });
   server_.begin();
   started_ = true;
-  Serial.println("HTTP status on port 80  (/ and /status)");
+  Serial.println("HTTP on :80  (/ /status /metrics /setup)");
 }
 
 void WebPortal::loop() {
@@ -494,4 +495,35 @@ void WebPortal::handleStatus() {
   String out;
   serializeJson(doc, out);
   server_.send(200, "application/json", out);
+}
+
+void WebPortal::handleMetrics() {
+  // Prometheus-ish text; no auth (read-only, same as /status).
+  char buf[480];
+  const uint32_t served = ntp_ ? ntp_->servedCount() : 0;
+  const uint32_t rate = ntp_ ? ntp_->rateLimitedCount() : 0;
+  const uint32_t denied = ntp_ ? ntp_->deniedCount() : 0;
+  const uint32_t dropped = ntp_ ? ntp_->droppedCount() : 0;
+  const uint32_t reqs = ntp_ ? ntp_->requestCount() : 0;
+  const uint8_t clients = ntp_ ? ntp_->activeClientCount() : 0;
+  const unsigned heap = ESP.getFreeHeap();
+  snprintf(buf, sizeof(buf),
+           "# TYPE ntp_requests_total counter\n"
+           "ntp_requests_total %lu\n"
+           "# TYPE ntp_served_total counter\n"
+           "ntp_served_total %lu\n"
+           "# TYPE ntp_rate_limited_total counter\n"
+           "ntp_rate_limited_total %lu\n"
+           "# TYPE ntp_denied_total counter\n"
+           "ntp_denied_total %lu\n"
+           "# TYPE ntp_dropped_total counter\n"
+           "ntp_dropped_total %lu\n"
+           "# TYPE ntp_clients gauge\n"
+           "ntp_clients %u\n"
+           "# TYPE esp_free_heap_bytes gauge\n"
+           "esp_free_heap_bytes %u\n",
+           static_cast<unsigned long>(reqs), static_cast<unsigned long>(served),
+           static_cast<unsigned long>(rate), static_cast<unsigned long>(denied),
+           static_cast<unsigned long>(dropped), static_cast<unsigned>(clients), heap);
+  server_.send(200, "text/plain; charset=utf-8", buf);
 }
