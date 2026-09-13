@@ -223,13 +223,22 @@ void WebPortal::handleSetup() {
     settingsUnlock();
   }
   String body;
-  body.reserve(3200);
+  body.reserve(3800);
   body += F("<h1>NTP 设置</h1><p><a href='/'>返回状态</a></p>");
+  body += F("<div class='card'><h2 style='font-size:1rem;margin:0 0 8px'>管理口令</h2>"
+            "<p style='color:#64748b;font-size:.85rem'>写操作需要口令（默认 SoftAP："
+            "<code>NTP-</code>+MAC 后 4 位）。可在下方覆盖 SoftAP / Web 口令。</p>"
+            "<label>Auth</label><input id='auth' type='password' autocomplete='current-password'>"
+            "<label>SoftAP 口令覆盖（可选，≥8）</label>"
+            "<input id='appw' type='password' placeholder='留空=默认 NTP-XXXX'>"
+            "<label>Web 写口令覆盖（可选）</label>"
+            "<input id='webpw' type='password' placeholder='留空=跟 SoftAP'>"
+            "</div>");
   if (haveSaved) {
     body += F("<div class='card'><h2 style='font-size:1rem;margin:0 0 8px'>已保存的 WiFi</h2><p>SSID: <b>");
     body += savedSsid;
     body += F("</b></p>"
-              "<p style='color:#64748b;font-size:.85rem'>固件更新后会自动重连；无需重新输入密码。"
+              "<p style='color:#64748b;font-size:.85rem'>固件更新后会自动重连；无需重新输入 WiFi 密码。"
               "仅当路由器改密或换热点时才需要下方重新配网。</p>"
               "<button onclick='reconnectSaved()'>使用已保存网络重连</button>"
               "<p id='rmsg'></p></div>");
@@ -250,6 +259,11 @@ void WebPortal::handleSetup() {
             "<button onclick='saveWifi()'>连接</button>"
             "<p id='msg'></p></div>");
   body += F("<script>"
+            "function authBody(extra){"
+            " const o=Object.assign({auth:document.getElementById('auth').value||''},extra||{});"
+            " const ap=document.getElementById('appw').value;"
+            " const wp=document.getElementById('webpw').value;"
+            " if(ap)o.apPassword=ap;if(wp)o.webPassword=wp;return o;}"
             "async function sleep(ms){return new Promise(r=>setTimeout(r,ms));}"
             "async function scan(){"
             " document.getElementById('msg').textContent='Scanning...';"
@@ -269,18 +283,18 @@ void WebPortal::handleSetup() {
             "async function saveWifi(){"
             " const ssid=document.getElementById('ssid').value;"
             " const pass=document.getElementById('pass').value;"
-            " const body=JSON.stringify({ssid,pass});"
+            " const body=JSON.stringify(authBody({ssid,pass}));"
             " const r=await fetch('/save',{method:'POST',headers:{'Content-Type':'application/json'},body});"
             " document.getElementById('msg').textContent=await r.text();"
             "}"
             "async function reconnectSaved(){"
             " const r=await fetch('/save',{method:'POST',headers:{'Content-Type':'application/json'},"
-            "  body:JSON.stringify({reconnectSaved:true})});"
+            "  body:JSON.stringify(authBody({reconnectSaved:true})});"
             " document.getElementById('rmsg').textContent=await r.text();"
             "}"
             "async function savePolicy(){"
             " const anomalyPolicy=parseInt(document.getElementById('apol').value,10);"
-            " const body=JSON.stringify({anomalyPolicy});"
+            " const body=JSON.stringify(authBody({anomalyPolicy}));"
             " const r=await fetch('/save',{method:'POST',headers:{'Content-Type':'application/json'},body});"
             " document.getElementById('pmsg').textContent=await r.text();"
             "}"
@@ -341,6 +355,54 @@ void WebPortal::handleSave() {
     return;
   }
 
+  // B2: write endpoints require auth (default SoftAP derived password).
+  String expect;
+  if (settingsLock(pdMS_TO_TICKS(100))) {
+    expect = effectiveWebWritePassword(gSettings);
+    settingsUnlock();
+  } else {
+    expect = derivedSoftApPassword();
+  }
+  const char* got = doc["auth"].is<const char*>() ? doc["auth"].as<const char*>() : "";
+  if (expect.isEmpty() || got == nullptr || expect != String(got)) {
+    server_.send(401, "text/plain", "Unauthorized");
+    return;
+  }
+
+  // Optional password overrides (still require auth above).
+  bool touchMgmt = false;
+  if (doc["apPassword"].is<const char*>()) {
+    String ap = doc["apPassword"].as<const char*>();
+    if (ap == "null") {
+      ap = "";
+    }
+    if (!ap.isEmpty() && ap.length() < 8) {
+      server_.send(400, "text/plain", "apPassword must be >=8 chars");
+      return;
+    }
+    if (settingsLock(pdMS_TO_TICKS(100))) {
+      gSettings.apPassword = ap;
+      settingsUnlock();
+      touchMgmt = true;
+    }
+  }
+  if (doc["webPassword"].is<const char*>()) {
+    String wp = doc["webPassword"].as<const char*>();
+    if (wp == "null") {
+      wp = "";
+    }
+    if (settingsLock(pdMS_TO_TICKS(100))) {
+      gSettings.webPassword = wp;
+      settingsUnlock();
+      touchMgmt = true;
+    }
+  }
+  if (touchMgmt && settingsLock(pdMS_TO_TICKS(100))) {
+    AppSettings copy = gSettings;
+    settingsUnlock();
+    gStore.save(copy);
+  }
+
   // Reuse NVS WiFi without retyping password (SoftAP escape / post-OTA).
   if (doc["reconnectSaved"] == true) {
     String ssid;
@@ -391,8 +453,6 @@ void WebPortal::handleSave() {
   }
 
   // Only touch WiFi creds when ssid is a real JSON string (not missing/null).
-  // ArduinoJson as<String>() on null yields the literal "null" which is NOT empty —
-  // that used to wipe NVS SSID when saving anomaly policy alone.
   if (doc["ssid"].is<const char*>()) {
     pendingSsid_ = doc["ssid"].as<const char*>();
     pendingPass_ = doc["pass"].is<const char*>() ? String(doc["pass"].as<const char*>()) : String();
@@ -418,8 +478,8 @@ void WebPortal::handleSave() {
     }
   }
 
-  if (savedPolicy) {
-    server_.send(200, "text/plain", "Policy saved");
+  if (savedPolicy || touchMgmt) {
+    server_.send(200, "text/plain", savedPolicy ? "Policy saved" : "Password updated");
     return;
   }
   server_.send(400, "text/plain", "SSID or anomalyPolicy required");
@@ -453,6 +513,7 @@ void WebPortal::handleStatus() {
   doc["holdoverSec"] = hold;
   doc["savedSsid"] = savedSsid;
   doc["hasSavedWifi"] = !savedSsid.isEmpty();
+  doc["softApPasswordDefault"] = derivedSoftApPassword();
 
   const GpsStatus st = gps_ ? gps_->snapshot() : GpsStatus{};
   JsonObject gps = doc["gps"].to<JsonObject>();

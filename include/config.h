@@ -32,9 +32,10 @@
 #define PIN_LED_D4          12   // D4 RUN / WiFi
 #define PIN_LED_D5          13   // D5 GPS / PPS / NTP ready
 
-// SoftAP for web WiFi setup
+// SoftAP for web WiFi setup (SSID prefix). Password default: NTP-<MAC low 16-bit hex>.
 #define AP_SSID_PREFIX      "NTP-Setup"
-#define AP_PASSWORD         "12345678"
+// Deprecated fixed password — B2 uses derivedSoftApPassword() / NVS `appw`.
+#define AP_PASSWORD_LEGACY  "12345678"
 
 // NTP
 #define NTP_UDP_PORT         123

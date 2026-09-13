@@ -51,7 +51,7 @@ class WifiManager {
   bool isConnecting() const { return connectState_ == WifiConnectState::Connecting; }
   bool isConnectedState() const { return connectState_ == WifiConnectState::Connected; }
 
-  void startSetupAp();
+  void startSetupAp(const String& password);
   void stopAp();
   bool isStaConnected() const;
   IPAddress localIp() const;

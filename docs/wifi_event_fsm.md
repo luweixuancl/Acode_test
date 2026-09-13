@@ -71,4 +71,5 @@ Connected --DISC--> armed
 - STA 失败 / 重连放弃后进入 **纯 `WIFI_AP`**（不是 `AP_STA`）。
 - 原因：`AP_STA` 下残留 STA 扫描常导致 SoftAP **不发 beacon**，手机/电脑扫不到 SSID，但串口仍打印 `Setup AP`。
 - SoftAP 仅 **2.4 GHz**（ESP32-C3 无 5 GHz）。手机若只看 5G 列表会漏掉；请在 2.4G WiFi 列表中找 `NTP-Setup-XXXX`。
+- SoftAP 密码默认 **`NTP-`+模块 MAC 低 16 位十六进制**（串口打印 `MAC=` / `SoftAP default pass=`）；NVS `appw` 可覆盖。
 - 配网成功后再切回 STA（或 `AP_STA` 至停 AP）。

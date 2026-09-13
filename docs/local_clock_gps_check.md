@@ -19,7 +19,7 @@
 
 - 不上外部 TCXO / 完整 chrony 风格 PLL
 - 不把系统 `gettimeofday` 当作对外授时源
-- SoftAP 密码不变；同步时 RefID `GPSS`，未同步时 RefID `INIT`
+- SoftAP 密码默认 `NTP-`+MAC 后 4 位（NVS `appw` 可覆盖）；同步时 RefID `GPSS`，未同步时 RefID `INIT`
 
 ## 2. 已落地能力（相对初版缺口）
 

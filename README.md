@@ -9,7 +9,7 @@
 3. **旋转编码器菜单**：扫描 WiFi、网页配网、静态 IP、DHCP、时区、重启
 4. **手动静态 IP**：编码器逐字节编辑；保存时通过 **ARP 探测**检测局域网是否已有相同 IP
 5. **编码器配网**：扫描附近 WiFi → 选择 SSID → 编码器输入密码 → 连接
-6. **网页配网**：开启 SoftAP（`NTP-Setup-XXXX` / 密码 `12345678`，**仅 2.4 GHz**），浏览器选择 WiFi 并输入密码。手机/电脑若连在 5 GHz 上可能扫不到该热点，请在 WLAN 列表中看 2.4 GHz 网络，或先断开当前 WiFi 再扫。
+6. **网页配网**：开启 SoftAP（`NTP-Setup-XXXX` / 密码默认 **`NTP-`+MAC 后 4 位十六进制**，与串口打印的 MAC 对应；**仅 2.4 GHz**）。`POST /save` 需带 `auth` 口令（默认同 SoftAP 密码）；`/` `/status` `/metrics` 只读开放。手机/电脑若连在 5 GHz 上可能扫不到该热点。
 7. **网页状态**：STA 连上后访问 `http://<设备IP>/` 查看 NTP/GPS/PPS（JS 按 1 Hz 轮询 `/status`，无需整页刷新）；`/setup` 仍可改 WiFi
 8. **FreeRTOS 三任务**：`task-time`(5) 独占 GNSS/NTP，`task-net`(2) 管 WiFi/网页，`task-ui`(1) 管 OLED/编码器/LED；PPS 计数对齐避免 NMEA 迟到导致的整秒跳变
 9. **WiFi 事件 + 自动重连**：`GOT_IP`/`DISC`/`SCAN_DONE` 驱动状态机；掉线后退避重连（默认开，NVS `arec`）；多次失败后开 SoftAP 逃生。本板为 **C3 单核**，不做双核拆分（详见 `docs/wifi_event_fsm.md`）

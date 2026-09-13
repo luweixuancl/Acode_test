@@ -64,7 +64,14 @@ static void openSetupApIfNeeded(const char* uiMsg) {
     return;
   }
   gWifi.cancelAutoReconnect();
-  gWifi.startSetupAp();
+  String apPass;
+  if (settingsLock(pdMS_TO_TICKS(50))) {
+    apPass = effectiveSoftApPassword(gSettings);
+    settingsUnlock();
+  } else {
+    apPass = derivedSoftApPassword();
+  }
+  gWifi.startSetupAp(apPass);
   gIpc.setupAp = true;
   postUiText(uiMsg != nullptr ? uiMsg : "AP setup mode");
 }
@@ -177,10 +184,18 @@ static void handleNetRequest(const NetRequest& req) {
       }
       break;
     }
-    case NetReqType::StartWebSetup:
-      gWifi.startSetupAp();
+    case NetReqType::StartWebSetup: {
+      String apPass;
+      if (settingsLock(pdMS_TO_TICKS(50))) {
+        apPass = effectiveSoftApPassword(gSettings);
+        settingsUnlock();
+      } else {
+        apPass = derivedSoftApPassword();
+      }
+      gWifi.startSetupAp(apPass);
       gIpc.setupAp = true;
       break;
+    }
   }
 }
 
@@ -350,7 +365,8 @@ static void taskNet(void* /*arg*/) {
       postUiText("WiFi joining...");
     }
   } else {
-    gWifi.startSetupAp();
+    String apPass = effectiveSoftApPassword(boot);
+    gWifi.startSetupAp(apPass);
     gIpc.setupAp = true;
     postUiText("AP setup mode");
     gBootNeedApIfFail = false;
@@ -426,6 +442,10 @@ void setup() {
   gGps.begin();
   gWifi.begin();
   gNtp.begin();
+
+  Serial.printf("MAC=%s\n", WiFi.macAddress().c_str());
+  Serial.printf("SoftAP default pass=%s (NVS appw overrides if set)\n",
+                derivedSoftApPassword().c_str());
 
   // Priority: time=5 > net=2 > ui=1 (all below WiFi/lwIP ~18+)
   xTaskCreatePinnedToCore(taskTime, "task-time", 6144, nullptr, 5, &gTaskTime, 0);

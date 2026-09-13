@@ -10,6 +10,8 @@ uint32_t settingsCrc(const AppSettings& s) {
   uint32_t crc = 0;
   crc = esp_crc32_le(crc, reinterpret_cast<const uint8_t*>(s.wifiSsid.c_str()), s.wifiSsid.length());
   crc = esp_crc32_le(crc, reinterpret_cast<const uint8_t*>(s.wifiPass.c_str()), s.wifiPass.length());
+  crc = esp_crc32_le(crc, reinterpret_cast<const uint8_t*>(s.apPassword.c_str()), s.apPassword.length());
+  crc = esp_crc32_le(crc, reinterpret_cast<const uint8_t*>(s.webPassword.c_str()), s.webPassword.length());
   const uint8_t flags[] = {
       static_cast<uint8_t>(s.useStaticIp ? 1 : 0),
       static_cast<uint8_t>(s.timezoneHours),
@@ -70,6 +72,14 @@ AppSettings SettingsStore::load() const {
     s.holdoverSec = 600;
   }
   s.autoReconnect = prefs_.getBool("arec", true);
+  s.apPassword = prefs_.getString("appw", "");
+  s.webPassword = prefs_.getString("webpw", "");
+  if (s.apPassword == "null" || s.apPassword == "undefined") {
+    s.apPassword = "";
+  }
+  if (s.webPassword == "null" || s.webPassword == "undefined") {
+    s.webPassword = "";
+  }
 
   const uint16_t ver = prefs_.getUShort("ver", 0);
   const uint32_t storedCrc = prefs_.getUInt("crc", 0);
@@ -120,6 +130,8 @@ void SettingsStore::save(const AppSettings& s) const {
   prefs_.putUChar("apol", static_cast<uint8_t>(s.anomalyPolicy));
   prefs_.putUShort("ahold", s.holdoverSec);
   prefs_.putBool("arec", s.autoReconnect);
+  prefs_.putString("appw", s.apPassword);
+  prefs_.putString("webpw", s.webPassword);
   prefs_.putUShort("ver", kSettingsVer);
   prefs_.putUInt("crc", settingsCrc(s));
 }

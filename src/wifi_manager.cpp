@@ -1,5 +1,6 @@
 #include "wifi_manager.h"
 #include "config.h"
+#include "settings.h"
 #include <WiFi.h>
 #include <esp_wifi.h>
 #include <lwip/etharp.h>
@@ -350,7 +351,7 @@ bool WifiManager::pollAutoReconnect(AppSettings* outSettings) {
   return true;
 }
 
-void WifiManager::startSetupAp() {
+void WifiManager::startSetupAp(const String& password) {
   // SoftAP escape hatch: pure AP mode. AP_STA + leftover STA scans often makes
   // the beacon invisible to phones/PCs even though softAP() returns success.
   cancelAutoReconnect();
@@ -367,11 +368,16 @@ void WifiManager::startSetupAp() {
   String ssid = String(AP_SSID_PREFIX) + "-" + String((uint32_t)ESP.getEfuseMac() & 0xFFFF, HEX);
   ssid.toUpperCase();
 
+  String pass = password;
+  if (pass.length() < 8) {
+    pass = derivedSoftApPassword();
+  }
+
   WiFi.mode(WIFI_AP);
   WiFi.softAPConfig(IPAddress(192, 168, 4, 1), IPAddress(192, 168, 4, 1), IPAddress(255, 255, 255, 0));
   // Fixed channel so beacon is stable (STA scanning would otherwise hop).
-  const bool ok = WiFi.softAP(ssid.c_str(), AP_PASSWORD, /*channel=*/6, /*ssid_hidden=*/0, /*max_connection=*/4);
-  Serial.printf("Setup AP: %s / %s  IP=%s ch=6 ok=%d mode=%d\n", ssid.c_str(), AP_PASSWORD,
+  const bool ok = WiFi.softAP(ssid.c_str(), pass.c_str(), /*channel=*/6, /*ssid_hidden=*/0, /*max_connection=*/4);
+  Serial.printf("Setup AP: %s / %s  IP=%s ch=6 ok=%d mode=%d\n", ssid.c_str(), pass.c_str(),
                 WiFi.softAPIP().toString().c_str(), ok ? 1 : 0, static_cast<int>(WiFi.getMode()));
 }
 

@@ -59,7 +59,32 @@ struct AppSettings {
   AnomalyPolicy anomalyPolicy = AnomalyPolicy::Refuse;
   uint16_t holdoverSec = CLK_HOLDOVER_SHORT_SEC;
   bool autoReconnect = true;  // NVS key arec
+  // Empty → derived "NTP-" + MAC low 16-bit hex (NVS appw / webpw).
+  String apPassword;
+  String webPassword;
 };
+
+// SoftAP / web-write password helpers (B2).
+inline String derivedSoftApPassword() {
+  char buf[12];
+  snprintf(buf, sizeof(buf), "NTP-%04X",
+           static_cast<unsigned>(static_cast<uint32_t>(ESP.getEfuseMac()) & 0xFFFFu));
+  return String(buf);
+}
+
+inline String effectiveSoftApPassword(const AppSettings& s) {
+  if (!s.apPassword.isEmpty()) {
+    return s.apPassword;
+  }
+  return derivedSoftApPassword();
+}
+
+inline String effectiveWebWritePassword(const AppSettings& s) {
+  if (!s.webPassword.isEmpty()) {
+    return s.webPassword;
+  }
+  return effectiveSoftApPassword(s);
+}
 
 class SettingsStore {
  public:

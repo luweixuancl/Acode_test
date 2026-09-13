@@ -426,8 +426,15 @@ void DisplayUi::drawWebHint() {
   display_.setCursor(0, 16);
   display_.println("Join AP NTP-Setup-*");
   display_.setCursor(0, 28);
-  display_.print("Pass: ");
-  display_.println(AP_PASSWORD);
+  display_.print("Pass:");
+  String apPass;
+  if (settingsLock(pdMS_TO_TICKS(20))) {
+    apPass = effectiveSoftApPassword(gSettings);
+    settingsUnlock();
+  } else {
+    apPass = derivedSoftApPassword();
+  }
+  display_.println(apPass);
   display_.setCursor(0, 40);
   display_.print("Open http://");
   display_.println(WiFi.softAPIP());
