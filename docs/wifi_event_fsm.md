@@ -50,8 +50,10 @@ Connected --DISC--> armed
 ## 扫描
 
 - `startScan` 异步 `scanNetworks`；完成以 `SCAN_DONE` 为主，`scanComplete` 为双保险。
-- 结果写入 `lastScan_`；`NetWork::Scanning`（OLED）与 Web `/scan` 都读同一缓存。
-- 连接 / ARP probe 期间 `startScan` 失败 → Web 返回 `busy`。
+- SoftAP 逃生是纯 `WIFI_AP`，**没有 STA 接口时 `scanNetworks` 会失败或 0 个 AP**。编码器/网页扫描前若当前是 `WIFI_AP`/`OFF`，先切到 `WIFI_AP_STA`（或 `STA`）再扫。
+- 编码器扫网是明确操作：若正在 `Connecting`/自动重连，先 `abortJoin` 再扫（否则会一直 `Scan failed` / busy）。
+- 结果写入 `lastScan_`；`NetWork::Scanning`（OLED）与 Web `/scan` 都读同一缓存。空列表算成功（OLED 显示 No APs，可再点重试），不再当成 Scan failed。
+- ARP probe 期间 `startScan` 仍失败 → Web 返回 `busy`。
 
 ## 常见 DISC reason（排障）
 

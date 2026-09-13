@@ -47,6 +47,7 @@ void DisplayUi::onScanResults(const std::vector<WifiNetwork>& nets) {
   networks_ = nets;
   wifiIndex_ = 0;
   scanPending_ = false;
+  scanError_ = nets.empty() ? String("No APs") : String();
   mode_ = UiMode::WifiScan;
   messageUntil_ = 0;
 }
@@ -67,7 +68,8 @@ void DisplayUi::drainUiMessages() {
       }
     } else if (msg.type == UiMsgType::ScanFailed) {
       scanPending_ = false;
-      showMessage("Scan failed");
+      scanError_ = msg.text[0] ? String(msg.text) : String("Scan failed");
+      mode_ = UiMode::WifiScan;
     }
   }
 }
@@ -87,7 +89,7 @@ void DisplayUi::loop(EncoderInput& enc, GpsService& gps, WifiManager& wifi, NtpS
       handleMenu(rot, click, longPress);
       break;
     case UiMode::WifiScan:
-      handleWifiScan(rot, click);
+      handleWifiScan(rot, click, longPress);
       break;
     case UiMode::WifiPassword:
       handlePassword(rot, click, longPress);
@@ -312,11 +314,19 @@ void DisplayUi::drawWifiScan() {
   if (scanPending_) {
     display_.setCursor(0, 20);
     display_.println("Scanning...");
+    display_.setCursor(0, 40);
+    display_.println("long=back");
     return;
   }
   if (networks_.empty()) {
     display_.setCursor(0, 20);
-    display_.println("Empty. Click scan");
+    if (scanError_.length()) {
+      display_.println(scanError_);
+    } else {
+      display_.println("No APs");
+    }
+    display_.setCursor(0, 40);
+    display_.println("click=retry");
     return;
   }
   const int visible = 4;
@@ -518,8 +528,9 @@ void DisplayUi::handleMenu(int8_t rot, bool click, bool longPress) {
     case MenuItem::WifiScan:
       networks_.clear();
       wifiIndex_ = 0;
-      scanPending_ = false;
+      scanError_ = "";
       mode_ = UiMode::WifiScan;
+      requestWifiScan();
       break;
     case MenuItem::WebSetup: {
       NetRequest req;
@@ -579,21 +590,31 @@ void DisplayUi::handleMenu(int8_t rot, bool click, bool longPress) {
   }
 }
 
-void DisplayUi::handleWifiScan(int8_t rot, bool click) {
-  if (networks_.empty() && !scanPending_) {
-    if (click) {
-      NetRequest req;
-      req.type = NetReqType::ScanWifi;
-      if (postNetRequest(req)) {
-        scanPending_ = true;
-        showMessage("Scanning...");
-      } else {
-        showMessage("Scan busy");
-      }
-    }
+void DisplayUi::requestWifiScan() {
+  NetRequest req;
+  req.type = NetReqType::ScanWifi;
+  if (postNetRequest(req)) {
+    scanPending_ = true;
+    scanError_ = "";
+  } else {
+    scanPending_ = false;
+    scanError_ = "Scan busy";
+  }
+}
+
+void DisplayUi::handleWifiScan(int8_t rot, bool click, bool longPress) {
+  if (longPress) {
+    scanPending_ = false;
+    mode_ = UiMode::Menu;
     return;
   }
   if (scanPending_) {
+    return;
+  }
+  if (networks_.empty()) {
+    if (click) {
+      requestWifiScan();
+    }
     return;
   }
   if (rot > 0 && wifiIndex_ + 1 < networks_.size()) {

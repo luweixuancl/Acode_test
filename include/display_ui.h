@@ -65,7 +65,7 @@ class DisplayUi {
 
   void handleHome(int8_t rot, bool click);
   void handleMenu(int8_t rot, bool click, bool longPress);
-  void handleWifiScan(int8_t rot, bool click);
+  void handleWifiScan(int8_t rot, bool click, bool longPress);
   void handlePassword(int8_t rot, bool click, bool longPress);
   void handleSetIp(int8_t rot, bool click, bool longPress);
   void handleTimezone(int8_t rot, bool click);
@@ -74,6 +74,7 @@ class DisplayUi {
   void handleTempComp(int8_t rot, bool click, bool longPress);
   void handleNtpStats(int8_t rot, bool click, bool longPress);
   void drainUiMessages();
+  void requestWifiScan();
 
   Adafruit_SH1107 display_{OLED_WIDTH, OLED_HEIGHT, &Wire, -1};
   UiMode mode_ = UiMode::Home;
@@ -81,6 +82,7 @@ class DisplayUi {
   uint8_t wifiIndex_ = 0;
   std::vector<WifiNetwork> networks_;
   bool scanPending_ = false;
+  String scanError_;
   String password_;
   uint8_t pwdCursor_ = 0;
   uint8_t ipOctet_ = 0;

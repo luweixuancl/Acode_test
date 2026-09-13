@@ -82,6 +82,19 @@ uint32_t WifiManager::backoffMsForAttempt(uint8_t attempt) {
   }
 }
 
+void WifiManager::abortJoin() {
+  cancelAutoReconnect();
+  if (connectState_ == WifiConnectState::Connecting) {
+    Serial.println("[wifi] abort join for scan");
+    WiFi.disconnect(false);
+    delay(30);
+    takeEventBit(WifiEvtBits::Disc);
+    takeEventBit(WifiEvtBits::GotIp);
+  }
+  connectState_ = WifiConnectState::Idle;
+  expectLink_ = false;
+}
+
 void WifiManager::cancelAutoReconnect() {
   reconnectArmed_ = false;
   reconnectAttempt_ = 0;
@@ -408,22 +421,36 @@ String WifiManager::macAddress() const {
 
 bool WifiManager::startScan() {
   if (isConnecting() || isProbeRunning()) {
+    Serial.println("[wifi] scan refused (connecting/probe)");
     return false;
   }
   if (scanState_ == WifiScanState::Running) {
     return true;
   }
 
-  // Do not cancelAutoReconnect — scan must not abort STA recovery.
+  // SoftAP escape is WIFI_AP-only; scan needs a STA interface.
+  const wifi_mode_t mode = WiFi.getMode();
+  if (mode == WIFI_AP || mode == WIFI_OFF) {
+    Serial.printf("[wifi] scan: mode %d → AP_STA\n", static_cast<int>(mode));
+    WiFi.mode(mode == WIFI_AP ? WIFI_AP_STA : WIFI_STA);
+    delay(80);
+  }
+
   takeEventBit(WifiEvtBits::ScanDone);
 
-  const int16_t r = WiFi.scanNetworks(/*async=*/true, /*hidden=*/false);
+  int16_t r = WiFi.scanNetworks(/*async=*/true, /*hidden=*/false);
+  if (r == WIFI_SCAN_FAILED) {
+    delay(50);
+    r = WiFi.scanNetworks(/*async=*/true, /*hidden=*/false);
+  }
   if (r == WIFI_SCAN_FAILED) {
     scanState_ = WifiScanState::Failed;
+    Serial.println("[wifi] scanNetworks failed");
     return false;
   }
   scanState_ = WifiScanState::Running;
   scanStartedMs_ = millis();
+  Serial.println("[wifi] scan started");
   return true;
 }
 

@@ -57,6 +57,9 @@ class WifiManager {
   IPAddress localIp() const;
   String macAddress() const;
 
+  // Drop an in-progress STA join so the radio can scan (encoder / user abort).
+  void abortJoin();
+
   // Non-blocking scan (completion driven by SCAN_DONE when possible).
   bool startScan();
   bool isScanRunning() const { return scanState_ == WifiScanState::Running; }

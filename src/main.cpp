@@ -129,18 +129,25 @@ static void handleNetRequest(const NetRequest& req) {
       handleConnect(req.ssid, req.pass);
       break;
     case NetReqType::ScanWifi: {
+      if (gNetWork == NetWork::Scanning || gWifi.isScanRunning()) {
+        break;
+      }
+      // Encoder scan is explicit: drop a stuck join / reconnect so STA can scan.
+      if (gNetWork == NetWork::Connecting || gWifi.isConnecting()) {
+        gWifi.abortJoin();
+        gNetWork = NetWork::Idle;
+      }
       if (gNetWork != NetWork::Idle || gWifi.isBusy()) {
-        postUiText("WiFi busy");
-        UiMsg msg;
+        UiMsg msg{};
         msg.type = UiMsgType::ScanFailed;
-        msg.text[0] = '\0';
+        strncpy(msg.text, "WiFi busy", sizeof(msg.text) - 1);
         xQueueSend(gIpc.uiMsg, &msg, 0);
         break;
       }
       if (!gWifi.startScan()) {
-        UiMsg msg;
+        UiMsg msg{};
         msg.type = UiMsgType::ScanFailed;
-        msg.text[0] = '\0';
+        strncpy(msg.text, "start fail", sizeof(msg.text) - 1);
         xQueueSend(gIpc.uiMsg, &msg, 0);
         break;
       }
@@ -272,13 +279,16 @@ static void pollNetWork() {
           xSemaphoreGive(gIpc.scanMutex);
         }
         UiMsg msg;
-        msg.type = nets.empty() ? UiMsgType::ScanFailed : UiMsgType::ScanResult;
+        msg.type = UiMsgType::ScanResult;
         msg.text[0] = '\0';
         xQueueSend(gIpc.uiMsg, &msg, 0);
+        if (nets.empty()) {
+          Serial.println("[wifi] scan done: 0 APs");
+        }
       } else {
-        UiMsg msg;
+        UiMsg msg{};
         msg.type = UiMsgType::ScanFailed;
-        msg.text[0] = '\0';
+        strncpy(msg.text, "scan fail", sizeof(msg.text) - 1);
         xQueueSend(gIpc.uiMsg, &msg, 0);
       }
       break;
