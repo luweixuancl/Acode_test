@@ -39,6 +39,14 @@
 // NTP
 #define NTP_UDP_PORT         123
 #define NTP_EPOCH_DELTA   2208988800UL  // 1900 -> 1970
+// B1 rate limit / Kiss-o'-Death (task-time only; static client table)
+#define NTP_CLIENT_SLOTS              12
+#define NTP_RATE_PER_IP_PER_SEC        4
+#define NTP_GLOBAL_RATE_PER_SEC       32
+#define NTP_RATE_WINDOW_MS          1000
+#define NTP_RATE_TO_DENY_MS        10000  // sustained over-limit → DENY cooldown
+#define NTP_DENY_COOLDOWN_MS       60000
+#define NTP_MAX_PACKETS_PER_LOOP       8
 
 // UI / timing
 #define DISPLAY_REFRESH_MS   250
@@ -59,7 +67,6 @@
 // Boot: first STA fail arms reconnect; SoftAP only after give-up (not after 1x 201).
 #define WIFI_BOOT_SOFTAP_AFTER_GIVEUP 1
 #define GPS_NMEA_MAX_BYTES_PER_LOOP 256
-#define NTP_MAX_PACKETS_PER_LOOP      8
 // TinyGPSPlus isValid() stays true after last sentence; require fresh age + sats>0.
 #define GPS_FIX_MAX_AGE_MS           5000
 

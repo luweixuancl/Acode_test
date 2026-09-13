@@ -485,6 +485,11 @@ void WebPortal::handleStatus() {
   // LI is leap-second indicator only; holdover stays LI=0 with rising dispersion.
   ntp["li"] = syncOk ? 0 : 3;
   ntp["requests"] = ntp_ ? ntp_->requestCount() : 0;
+  ntp["served"] = ntp_ ? ntp_->servedCount() : 0;
+  ntp["rateLimited"] = ntp_ ? ntp_->rateLimitedCount() : 0;
+  ntp["denied"] = ntp_ ? ntp_->deniedCount() : 0;
+  ntp["dropped"] = ntp_ ? ntp_->droppedCount() : 0;
+  ntp["clients"] = ntp_ ? ntp_->activeClientCount() : 0;
 
   String out;
   serializeJson(doc, out);
