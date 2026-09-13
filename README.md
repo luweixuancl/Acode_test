@@ -116,6 +116,8 @@ GPS 锁定且 PPS 正常时，应答为 **stratum 1**，Reference ID 为 `GPSS`�
 
 ACL 白名单（阶段 B3）：默认 **Off**。开启 AllowList 后仅列出的 IPv4（最多 8 条）可取时，未命中静默丢弃；空列表=拒绝全部。OLED **NTP ACL** 切换模式；IP 列表在 `/setup` 编辑。`/status` 含 `ntpAclMode` / `ntpAcl` / `ntp.aclDenied`。
 
+**不做阶段 C**：NTS、HTTPS、PTP、硬件时间戳、TCXO 等机架级能力对本板（C3 + 无线）成本过高或得不偿失，产品范围止于阶段 A+B 的内网轻量 Stratum-1。
+
 Windows 下若工程路径含非 ASCII 字符导致链接失败，可用 ASCII junction（如 `C:\acode_leds`）再 `pio run`。
 
 ## 目录结构

@@ -58,6 +58,7 @@ Do not hardcode pins in `.cpp`; use `config.h` macros.
 - `WifiManager`: `WiFi.onEvent` only sets flags/logs; `task-net` consumes GOT_IP/DISC/SCAN_DONE. Connect success prefers GOT_IP (fallback WL_CONNECTED+IP). STA drop → backoff auto-reconnect (`WIFI_RECONNECT_*`, NVS `arec` default on); give-up opens SoftAP. Scan results cached in `lastScan_` for OLED + `/scan`.
 - `task-net` polls STA connect / WiFi scan / ARP conflict without blocking; HTTP `handleClient` keeps running during join/scan.
 - Design: `docs/local_clock_gps_check.md`, `docs/wifi_event_fsm.md`, `docs/ntp_cmp_test_20260911.md`.
+- Product scope stops at Phase A+B (honest Stratum-1 + intranet hardening). **No Phase C**: NTS / HTTPS / PTP / TCXO / hardware timestamp — not worth it on ESP32-C3 + WiFi.
 - Windows note: project path with non-ASCII may break `ld` map file; build via ASCII junction (e.g. `C:\acode_leds`) if link fails.
 
 ## Conventions
