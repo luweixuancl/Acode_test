@@ -487,10 +487,10 @@ void DisplayUi::drawWebHint() {
   }
   display_.println(apPass);
   display_.setCursor(0, 40);
-  display_.print("Open http://");
-  display_.println(WiFi.softAPIP());
-  display_.setCursor(0, 56);
-  display_.print("click=back");
+  display_.print("web admin ");
+  display_.println(apPass);
+  display_.setCursor(0, 52);
+  display_.print(WiFi.softAPIP());
 }
 
 void DisplayUi::handleHome(int8_t rot, bool click) {

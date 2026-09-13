@@ -21,6 +21,8 @@ class WebPortal {
   void handleSave();
   void handleStatus();
   void handleMetrics();
+  bool requireWriteAuth();
+  String writePassword() const;
   String buildPage(const String& title, const String& body, bool refresh = false) const;
 
   WebServer server_{80};
