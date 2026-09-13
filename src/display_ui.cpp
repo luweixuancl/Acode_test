@@ -158,48 +158,110 @@ void DisplayUi::loop(EncoderInput& enc, GpsService& gps, WifiManager& wifi) {
 }
 
 void DisplayUi::drawHome(const GpsStatus& st, const WifiManager& wifi, const AppSettings& settings) {
-  display_.setCursor(0, 0);
-  display_.println("ESP32-C3 NTP Srv");
+  // Scheme A (128×64): top status chips · large time · SSID · IP+SYNC
+  // Built-in font: size1 = 6×8, size2 = 12×16.
 
-  display_.setCursor(0, 12);
-  if (wifi.isStaConnected()) {
-    display_.print("IP ");
-    display_.println(wifi.localIp());
+  static const uint8_t kIconSat[] PROGMEM = {
+      0b00011000, 0b00111100, 0b01100110, 0b11011011,
+      0b01100110, 0b00111100, 0b00011000, 0b00100100,
+  };
+  static const uint8_t kIconWifi[] PROGMEM = {
+      0b00000000, 0b00111000, 0b01000100, 0b10000010,
+      0b00111000, 0b01000100, 0b00010000, 0b00010000,
+  };
+
+  const bool sta = wifi.isStaConnected();
+  const bool ap = gIpc.setupAp;
+
+  // --- Top bar (y=0..8) ---
+  display_.drawBitmap(0, 0, kIconSat, 8, 8, SH110X_WHITE);
+  display_.setTextSize(1);
+  display_.setCursor(10, 0);
+  char left[20];
+  snprintf(left, sizeof(left), "%u %s", static_cast<unsigned>(st.satellites),
+           clockStateLabel(st.clockState));
+  display_.print(left);
+
+  display_.drawBitmap(80, 0, kIconWifi, 8, 8, SH110X_WHITE);
+  char right[14];
+  if (sta) {
+    snprintf(right, sizeof(right), "%d", static_cast<int>(WiFi.RSSI()));
+  } else if (ap) {
+    snprintf(right, sizeof(right), "AP");
+  } else if (!settings.wifiSsid.isEmpty()) {
+    snprintf(right, sizeof(right), "JOIN");
   } else {
-    display_.println("IP (no STA)");
+    snprintf(right, sizeof(right), "--");
   }
+  const int16_t rightW = static_cast<int16_t>(strlen(right) * 6);
+  display_.setCursor(128 - rightW, 0);
+  display_.print(right);
 
-  display_.setCursor(0, 24);
-  display_.print("GPS ");
-  if (st.validFix) {
-    display_.print("LOCK ");
-    display_.print(st.satellites);
-    display_.print("s");
-  } else {
-    display_.print("SEARCH ");
-    display_.print(st.satellites);
-  }
+  // Thin separator under status chips
+  display_.drawFastHLine(0, 10, 128, SH110X_WHITE);
 
-  display_.setCursor(0, 36);
-  display_.print(clockStateLabel(st.clockState));
-  display_.print(" R");
-  display_.print(st.residualMs);
-  display_.print(" A:");
-  display_.print(anomalyPolicyShortLabel(settings.anomalyPolicy));
-
-  display_.setCursor(0, 48);
+  // --- Large local time (primary) ---
+  char timeBuf[9];
   if (st.utcEpoch > 0) {
     time_t local = static_cast<time_t>(st.utcEpoch) + settings.timezoneHours * 3600L;
     struct tm tmv = {};
     gmtime_r(&local, &tmv);
-    char buf[20];
-    snprintf(buf, sizeof(buf), "%02d:%02d:%02d", tmv.tm_hour, tmv.tm_min, tmv.tm_sec);
-    display_.print(buf);
+    snprintf(timeBuf, sizeof(timeBuf), "%02d:%02d:%02d", tmv.tm_hour, tmv.tm_min, tmv.tm_sec);
   } else {
-    display_.print("--:--:--");
+    snprintf(timeBuf, sizeof(timeBuf), "--:--:--");
   }
-  display_.setCursor(72, 48);
-  display_.print(st.timeValid ? "SYNC" : "WAIT");
+  display_.setTextSize(2);
+  // 8 glyphs × 12 px = 96; center on 128
+  display_.setCursor(16, 16);
+  display_.print(timeBuf);
+
+  // --- SSID (secondary) ---
+  display_.setTextSize(1);
+  String ssid;
+  if (sta) {
+    ssid = WiFi.SSID();
+    if (ssid.isEmpty()) {
+      ssid = settings.wifiSsid;
+    }
+  } else if (ap) {
+    ssid = WiFi.softAPSSID();
+    if (ssid.isEmpty()) {
+      ssid = String(AP_SSID_PREFIX) + "-****";
+    }
+  } else if (!settings.wifiSsid.isEmpty()) {
+    ssid = settings.wifiSsid;
+  } else {
+    ssid = "(no WiFi)";
+  }
+  // Max ~21 chars at size1; keep 20 + NUL
+  char ssidLine[21];
+  const size_t n = ssid.length();
+  if (n <= 20) {
+    memcpy(ssidLine, ssid.c_str(), n);
+    ssidLine[n] = '\0';
+  } else {
+    memcpy(ssidLine, ssid.c_str(), 17);
+    ssidLine[17] = '.';
+    ssidLine[18] = '.';
+    ssidLine[19] = '.';
+    ssidLine[20] = '\0';
+  }
+  display_.setCursor(0, 38);
+  display_.print(ssidLine);
+
+  // --- IP + SYNC ---
+  display_.setCursor(0, 52);
+  if (sta) {
+    display_.print(wifi.localIp());
+  } else if (ap) {
+    display_.print(WiFi.softAPIP());
+  } else {
+    display_.print("--.--.--.--");
+  }
+
+  const char* sync = st.timeValid ? "SYNC" : "WAIT";
+  display_.setCursor(128 - static_cast<int16_t>(strlen(sync) * 6), 52);
+  display_.print(sync);
 }
 
 void DisplayUi::drawMenu() {
