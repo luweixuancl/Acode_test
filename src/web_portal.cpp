@@ -5,6 +5,7 @@
 #include "ntp_server.h"
 #include <ArduinoJson.h>
 #include <WiFi.h>
+#include <esp_system.h>
 #include <math.h>
 #include <time.h>
 
@@ -70,8 +71,13 @@ void WebPortal::begin(WifiManager* wifi, GpsService* gps, NtpServer* ntp) {
     return;
   }
 
+  const char* hdrs[] = {"Cookie"};
+  server_.collectHeaders(hdrs, 1);
+
   server_.on("/", HTTP_GET, [this]() { handleRoot(); });
   server_.on("/setup", HTTP_GET, [this]() { handleSetup(); });
+  server_.on("/login", HTTP_POST, [this]() { handleLogin(); });
+  server_.on("/logout", HTTP_GET, [this]() { handleLogout(); });
   server_.on("/scan", HTTP_GET, [this]() { handleScan(); });
   server_.on("/save", HTTP_POST, [this]() { handleSave(); });
   server_.on("/status", HTTP_GET, [this]() { handleStatus(); });
@@ -88,7 +94,7 @@ void WebPortal::begin(WifiManager* wifi, GpsService* gps, NtpServer* ntp) {
   });
   server_.begin();
   started_ = true;
-  Serial.println("HTTP on :80  (/ /status /metrics open; /setup /save /scan Basic admin)");
+  Serial.println("HTTP on :80  (/status /metrics open; /setup needs login)");
 }
 
 void WebPortal::loop() {
@@ -115,28 +121,110 @@ String WebPortal::writePassword() const {
   } else {
     expect = derivedSoftApPassword();
   }
+  if (expect.isEmpty()) {
+    expect = derivedSoftApPassword();
+  }
   return expect;
 }
 
-bool WebPortal::requireWriteAuth() {
+void WebPortal::sendNoCache() {
+  server_.sendHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+  server_.sendHeader("Pragma", "no-cache");
+}
+
+void WebPortal::issueSession() {
+  char tok[17];
+  snprintf(tok, sizeof(tok), "%08x%08x", static_cast<unsigned>(esp_random()),
+           static_cast<unsigned>(esp_random()));
+  sessionToken_ = tok;
+  sessionUntilMs_ = millis() + 30UL * 60UL * 1000UL;
+  String cookie = String("ntp_sess=") + sessionToken_ + "; Path=/; HttpOnly; SameSite=Lax";
+  server_.sendHeader("Set-Cookie", cookie);
+}
+
+bool WebPortal::isAuthorized() {
+  if (!sessionToken_.isEmpty() && sessionUntilMs_ != 0 &&
+      static_cast<int32_t>(millis() - sessionUntilMs_) < 0) {
+    const String cookie = server_.header("Cookie");
+    if (cookie.indexOf(String("ntp_sess=") + sessionToken_) >= 0) {
+      return true;
+    }
+  }
   const String expect = writePassword();
-  if (expect.isEmpty()) {
+  if (!expect.isEmpty() && server_.authenticate("admin", expect.c_str())) {
     return true;
   }
-  if (server_.authenticate("admin", expect.c_str())) {
+  return false;
+}
+
+bool WebPortal::requireWriteAuth() {
+  if (isAuthorized()) {
     return true;
   }
   if (server_.method() == HTTP_POST) {
+    const String expect = writePassword();
     JsonDocument doc;
     if (!deserializeJson(doc, server_.arg("plain"))) {
       const char* got = doc["auth"].is<const char*>() ? doc["auth"].as<const char*>() : "";
-      if (got != nullptr && expect == String(got)) {
+      if (got != nullptr && !expect.isEmpty() && expect == String(got)) {
         return true;
       }
     }
+    const String form = server_.arg("password");
+    if (!form.isEmpty() && form == writePassword()) {
+      issueSession();
+      return true;
+    }
   }
-  server_.requestAuthentication(BASIC_AUTH, "NTP Setup", "Unauthorized");
+  if (server_.method() == HTTP_GET) {
+    sendLoginPage("");
+    return false;
+  }
+  sendNoCache();
+  server_.send(401, "text/plain", "Unauthorized");
   return false;
+}
+
+void WebPortal::sendLoginPage(const char* err) {
+  sendNoCache();
+  String body;
+  body += F("<h1>NTP 设置登录</h1>"
+            "<div class='card'>"
+            "<p>输入配置口令后才能进入设置（默认与 SoftAP 相同，见串口 <code>SoftAP default pass=</code> 或 OLED）。</p>");
+  if (err && err[0]) {
+    body += F("<p class='bad'>");
+    body += err;
+    body += F("</p>");
+  }
+  body += F("<form method='POST' action='/login'>"
+            "<label>配置口令</label>"
+            "<input name='password' type='password' autocomplete='current-password' autofocus>"
+            "<button type='submit'>进入设置</button>"
+            "</form></div>"
+            "<p><a href='/'>返回状态</a></p>");
+  server_.send(200, "text/html", buildPage("NTP 登录", body));
+}
+
+void WebPortal::handleLogin() {
+  const String pass = server_.arg("password");
+  const String expect = writePassword();
+  if (!pass.isEmpty() && !expect.isEmpty() && pass == expect) {
+    issueSession();
+    sendNoCache();
+    server_.sendHeader("Location", "/setup", true);
+    server_.send(302, "text/plain", "");
+    return;
+  }
+  sendLoginPage("口令错误");
+}
+
+void WebPortal::handleLogout() {
+  sessionToken_ = "";
+  sessionUntilMs_ = 0;
+  sendNoCache();
+  server_.sendHeader("Set-Cookie", "ntp_sess=; Path=/; Max-Age=0");
+  server_.sendHeader("Location", "/setup", true);
+  server_.send(302, "text/plain", "");
 }
 
 String WebPortal::buildPage(const String& title, const String& body, bool refresh) const {
@@ -272,16 +360,8 @@ void WebPortal::handleSetup() {
     settingsUnlock();
   }
   String body;
-  body.reserve(6200);
-  body += F("<h1>NTP 设置</h1><p><a href='/'>返回状态</a></p>");
-  body += F("<div class='card'><h2 style='font-size:1rem;margin:0 0 8px'>口令覆盖（可选）</h2>"
-            "<p style='color:#64748b;font-size:.85rem'>本页已通过浏览器口令验证（用户名 "
-            "<code>admin</code>，默认口令与 SoftAP 相同）。可在此改 SoftAP / Web 口令。</p>"
-            "<label>SoftAP 口令覆盖（可选，≥8）</label>"
-            "<input id='appw' type='password' placeholder='留空=保持默认 NTP-XXXX'>"
-            "<label>Web 写口令覆盖（可选）</label>"
-            "<input id='webpw' type='password' placeholder='留空=跟 SoftAP'>"
-            "</div>");
+  body.reserve(5600);
+  body += F("<h1>NTP 设置</h1><p><a href='/'>返回状态</a> · <a href='/logout'>退出</a></p>");
   if (haveSaved) {
     body += F("<div class='card'><h2 style='font-size:1rem;margin:0 0 8px'>已保存的 WiFi</h2><p>SSID: <b>");
     body += savedSsid;
@@ -329,11 +409,7 @@ void WebPortal::handleSetup() {
             "<button type='button' onclick='saveWifi()'>连接</button>"
             "<p id='msg'></p></div>");
   body += F("<script>"
-            "function authBody(extra){"
-            " const o=Object.assign({},extra||{});"
-            " const ap=document.getElementById('appw').value;"
-            " const wp=document.getElementById('webpw').value;"
-            " if(ap)o.apPassword=ap;if(wp)o.webPassword=wp;return o;}"
+            "function authBody(extra){return Object.assign({},extra||{});}"
             "async function sleep(ms){return new Promise(r=>setTimeout(r,ms));}"
             "async function scan(){"
             " try{"
@@ -430,6 +506,7 @@ void WebPortal::handleSetup() {
     body += F("scan();");
   }
   body += F("</script>");
+  sendNoCache();
   server_.send(200, "text/html", buildPage("NTP 设置", body));
 }
 

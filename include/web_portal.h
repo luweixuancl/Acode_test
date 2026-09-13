@@ -17,13 +17,19 @@ class WebPortal {
  private:
   void handleRoot();
   void handleSetup();
+  void handleLogin();
+  void handleLogout();
   void handleScan();
   void handleSave();
   void handleStatus();
   void handleMetrics();
+  bool isAuthorized();
   bool requireWriteAuth();
+  void sendLoginPage(const char* err);
+  void issueSession();
   String writePassword() const;
   String buildPage(const String& title, const String& body, bool refresh = false) const;
+  void sendNoCache();
 
   WebServer server_{80};
   WifiManager* wifi_ = nullptr;
@@ -33,4 +39,6 @@ class WebPortal {
   bool started_ = false;
   String pendingSsid_;
   String pendingPass_;
+  String sessionToken_;
+  uint32_t sessionUntilMs_ = 0;
 };

@@ -487,7 +487,7 @@ void DisplayUi::drawWebHint() {
   }
   display_.println(apPass);
   display_.setCursor(0, 40);
-  display_.print("web admin ");
+  display_.print("web pass=");
   display_.println(apPass);
   display_.setCursor(0, 52);
   display_.print(WiFi.softAPIP());
