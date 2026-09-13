@@ -350,6 +350,30 @@ static void taskTime(void* /*arg*/) {
 
     gGps.loop(cachedPolicy, cachedHoldSec);
     gNtp.loop(gGps);
+
+#if NTP_STATUS_LOG_MS > 0
+    {
+      static uint32_t lastLogMs = 0;
+      const uint32_t now = millis();
+      if (lastLogMs == 0 || (now - lastLogMs) >= NTP_STATUS_LOG_MS) {
+        lastLogMs = now;
+        const GpsStatus st = gGps.snapshot();
+        Serial.printf(
+            "[ntp] req=%lu served=%lu RATE=%lu DENY=%lu drop=%lu aclDeny=%lu "
+            "clients=%u acl=%s/%u clk=%s\n",
+            static_cast<unsigned long>(gNtp.requestCount()),
+            static_cast<unsigned long>(gNtp.servedCount()),
+            static_cast<unsigned long>(gNtp.rateLimitedCount()),
+            static_cast<unsigned long>(gNtp.deniedCount()),
+            static_cast<unsigned long>(gNtp.droppedCount()),
+            static_cast<unsigned long>(gNtp.aclDeniedCount()),
+            static_cast<unsigned>(gNtp.activeClientCount()),
+            ntpAclModeMenuLabel(gNtp.aclMode()), static_cast<unsigned>(gNtp.aclCount()),
+            clockStateLabel(st.clockState));
+      }
+    }
+#endif
+
     ipcKickTime();
     esp_task_wdt_reset();
   }

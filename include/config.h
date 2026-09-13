@@ -50,6 +50,8 @@
 #define NTP_MAX_PACKETS_PER_LOOP       8
 // B3 ACL AllowList (exact IPv4; Off by default)
 #define NTP_ACL_MAX_ENTRIES            8
+// B4: periodic UART0 summary from task-time (0 = off)
+#define NTP_STATUS_LOG_MS          60000
 
 // UI / timing
 #define DISPLAY_REFRESH_MS   250

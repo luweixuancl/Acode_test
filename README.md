@@ -72,13 +72,26 @@
 - **Use DHCP**：改回自动获取 IP
 - **Timezone**：设置 UTC 偏移（默认 +8）
 - **Anomaly Mode**：GPS 异常策略 — Refuse（拒授时）/ Holdover 30s / Holdover 300s（写入 NVS）
+- **NTP ACL**：Off / AllowList（默认 Off；名单在网页 `/setup` 编辑）
+- **NTP Stats**：served / RATE / DENY / ACL / drop / clients
 - **Restart**：重启
 
-主界面显示时钟状态缩写（ACQ/LCK/DEG/HLD/UNS）与 residual；Web `/` 与 `/status` 同步展示。`/setup` 也可改异常策略。
+主界面显示时钟状态缩写（ACQ/LCK/DEG/HLD/UNS）与 residual；Web `/` 与 `/status` 同步展示。`/setup` 也可改异常策略与 ACL。
 
 长按编码器：多数界面返回上一级。
 
 D5（GNSS）：LCK/DEG 心跳；Holdover 快闪；ACQ 慢闪；UNS/无星灭。D4 STA 为心跳。双灯交替狂闪表示任务卡死告警。
+
+## 内网部署（阶段 B）
+
+面向局域网 Stratum-1，**不要**把 UDP/123 直接暴露到公网。
+
+1. **仅 2.4 GHz**：SoftAP 与 STA 都只支持 2.4G；手机若只看 5G 会扫不到 `NTP-Setup-XXXX`。
+2. **限流（B1）**：每 IP 约 4 req/s，超限 KoD `RATE`；持续超限 → `DENY` 冷静丢弃；全局约 32 pkt/s 静默丢弃，保护 `task-time`/PPS。
+3. **ACL（B3）**：默认 Off。需要更严时在 `/setup` 开 AllowList，只放行可信客户端 IP（最多 8 条）；空名单=拒绝全部。
+4. **管理面**：`/` `/status` `/metrics` 只读开放；改 WiFi/策略/ACL 的 `POST /save` 必须带 `auth`（默认 SoftAP 口令 `NTP-`+MAC 后 4 位）。
+5. **升级保配置**：只刷 `firmware.bin` @ `0x10000`，关闭全片擦除，以免清掉 NVS 里的 WiFi/口令/ACL。
+6. **观测**：OLED **NTP Stats**、串口约每 60s 一行 `[ntp] …` 摘要、或抓 `http://<ip>/metrics`。
 
 ## 编译与烧录
 
