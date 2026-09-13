@@ -99,6 +99,8 @@ chronyc sources
 
 GPS 锁定且 PPS 正常时，应答为 **stratum 1**，Reference ID 为 `GPSS`。未同步时 LI=3 / stratum 16 / RefID `INIT`；Holdover 时仍 **LI=0**（闰秒告警位不复用），靠抬高 root dispersion 与 `/status` 的 `clock.state=HLD` 标明守时。
 
+限流（阶段 B1）：每 IP 默认 4 req/s，超限回 KoD `RATE`；持续超限约 10s 后 KoD `DENY` 并冷静丢弃约 60s；全局约 32 req/s 静默丢弃。`/status` 字段 `served` / `rateLimited` / `denied` / `dropped` / `clients`。
+
 Windows 下若工程路径含非 ASCII 字符导致链接失败，可用 ASCII junction（如 `C:\acode_leds`）再 `pio run`。
 
 ## 目录结构
