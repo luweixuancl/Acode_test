@@ -47,6 +47,21 @@ inline const char* anomalyPolicyMenuLabel(AnomalyPolicy p) {
   }
 }
 
+enum class NtpAclMode : uint8_t {
+  Off = 0,        // all clients (still subject to B1 rate limit)
+  AllowList = 1,  // only listed IPv4; others silent drop
+};
+
+inline const char* ntpAclModeMenuLabel(NtpAclMode m) {
+  switch (m) {
+    case NtpAclMode::AllowList:
+      return "AllowList";
+    case NtpAclMode::Off:
+    default:
+      return "Off";
+  }
+}
+
 struct AppSettings {
   String wifiSsid;
   String wifiPass;
@@ -62,6 +77,10 @@ struct AppSettings {
   // Empty → derived "NTP-" + MAC low 16-bit hex (NVS appw / webpw).
   String apPassword;
   String webPassword;
+  // B3 NTP ACL (NVS aclm / acln / acl0..acl7); default Off.
+  NtpAclMode ntpAclMode = NtpAclMode::Off;
+  uint8_t ntpAclCount = 0;
+  IPAddress ntpAcl[NTP_ACL_MAX_ENTRIES];
 };
 
 // SoftAP / web-write password helpers (B2).

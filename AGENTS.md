@@ -49,9 +49,10 @@ Do not hardcode pins in `.cpp`; use `config.h` macros.
 - AnomalyPolicy in NVS (`apol`/`ahold`): Refuse / HoldoverShort(30s) / HoldoverLong(300s); OLED Anomaly Mode + Web `/setup`.
 - NTP honest metadata: unsync → LI=3/stratum 16/refid `INIT`; Locked/Degraded/Holdover LI=0 (LI is leap-second only); sync only LCK/DEG/HLD; PPS ready → precision -10; Reference Timestamp = last PPS-aligned second; dispersion from `qualityMs` (holdover: entry + max(EMA,50ppm,PHI)×age, cap → UNS).
 - NTP B1 rate limit: per-IP `NTP_RATE_PER_IP_PER_SEC` with KoD `RATE`; sustained abuse → KoD `DENY` then silent drop for `NTP_DENY_COOLDOWN_MS`; global `NTP_GLOBAL_RATE_PER_SEC` silent drop. Counters on `/status` (`served`/`rateLimited`/`denied`/`dropped`/`clients`).
+- NTP B3 ACL: default **Off**; AllowList mode (exact IPv4, max `NTP_ACL_MAX_ENTRIES`=8); miss/empty list → silent drop + `aclDenied`; listed IPs still under B1. NVS `aclm`/`acln`/`acl0..`; OLED **NTP ACL** (mode); Web `/setup` edits list. `/status` `ntpAclMode`/`ntpAcl`/`ntp.aclDenied`; `/metrics` gauges.
 - NTP B4 observability: OLED menu **NTP Stats**; `GET /metrics` (Prometheus text); `/status` counters unchanged (no auth).
-- SoftAP `NTP-Setup-XXXX` / password default **`NTP-`+MAC low-16 hex** when **no saved STA SSID** (or reconnect give-up / menu Web Setup). Serial prints `MAC=` and default SoftAP pass at boot. HTTP `/` `/status` `/metrics` read-only open; `POST /save` requires JSON `auth` (default = SoftAP pass; NVS `appw`/`webpw` overrides). `/setup` WiFi+policy (saved SSID + reconnect).
-- Settings persist with `Preferences` keys: `ssid`, `pass`, `static`, `ip`, `gw`, `mask`, `dns`, `tz`, `apol`, `ahold`, `arec`, `appw`, `webpw`, `ver`/`crc`. Default timezone +8; anomaly Refuse; SoftAP/web write pass derived from MAC when `appw`/`webpw` empty.
+- SoftAP `NTP-Setup-XXXX` / password default **`NTP-`+MAC low-16 hex** when **no saved STA SSID** (or reconnect give-up / menu Web Setup). Serial prints `MAC=` and default SoftAP pass at boot. HTTP `/` `/status` `/metrics` read-only open; `POST /save` requires JSON `auth` (default = SoftAP pass; NVS `appw`/`webpw` overrides). `/setup` WiFi+policy+ACL (saved SSID + reconnect).
+- Settings persist with `Preferences` keys: `ssid`, `pass`, `static`, `ip`, `gw`, `mask`, `dns`, `tz`, `apol`, `ahold`, `arec`, `appw`, `webpw`, `aclm`, `acln`, `acl0`…, `ver`/`crc`. Default timezone +8; anomaly Refuse; ACL Off; SoftAP/web write pass derived from MAC when `appw`/`webpw` empty.
 - Settings NVS: CRC mismatch **never clears WiFi** (only refreshes CRC); flash updates should write app @ `0x10000` without full-chip erase to keep NVS.
 - Stability: PPS ISR queue drains multi-edges; task-net/ui on TWDT + LED-stale soft-restart; scan does not cancel STA reconnect; Holdover dispersion uses ppm×age; NVS `ver`/`crc` guards settings.
 - `WifiManager`: `WiFi.onEvent` only sets flags/logs; `task-net` consumes GOT_IP/DISC/SCAN_DONE. Connect success prefers GOT_IP (fallback WL_CONNECTED+IP). STA drop → backoff auto-reconnect (`WIFI_RECONNECT_*`, NVS `arec` default on); give-up opens SoftAP. Scan results cached in `lastScan_` for OLED + `/scan`.
@@ -64,7 +65,7 @@ Do not hardcode pins in `.cpp`; use `config.h` macros.
 - Arduino C++11-ish: `#pragma once`, classes with `begin()`/`loop()`, trailing underscore members.
 - ISRs (`IRAM_ATTR`): PPS plus encoder A **and** B (CHANGE). Keep them short; share state via `volatile`. Encoder uses `esp_timer_get_time()` debounce (no `millis()` in ISR); rotate is consumed with `noInterrupts()`.
 - LEDs: HIGH = on. D4: AP ~4 Hz, no STA ~1 Hz, STA heartbeat (~900/100 ms). D5: off / ACQ blink / HLD fast blink / LCK·DEG heartbeat. Alternate panic blink if any task kick goes stale (~3 s).
-- Settings persist with `Preferences` keys: `ssid`, `pass`, `static`, `ip`, `gw`, `mask`, `dns`, `tz`, `apol`, `ahold`, `arec` (auto-reconnect, default true). Default timezone +8; anomaly Refuse.
+- Settings persist with `Preferences` keys: `ssid`, `pass`, `static`, `ip`, `gw`, `mask`, `dns`, `tz`, `apol`, `ahold`, `arec` (auto-reconnect, default true), `appw`, `webpw`, `aclm`/`acln`/`acl*`. Default timezone +8; anomaly Refuse; ACL Off.
 - Libs: ArduinoJson 7, Adafruit SH110X/GFX, TinyGPSPlus — versions pinned in `platformio.ini`.
 
 ## Do not

@@ -20,6 +20,7 @@ enum class UiMode : uint8_t {
   SetIp,
   SetTimezone,
   SetAnomaly,
+  SetAcl,
   NtpStats,
   WebSetupHint,
   Message,
@@ -32,6 +33,7 @@ enum class MenuItem : uint8_t {
   UseDhcp,
   Timezone,
   AnomalyMode,
+  NtpAcl,
   NtpStats,
   Restart,
   Count
@@ -53,6 +55,7 @@ class DisplayUi {
   void drawSetIp();
   void drawTimezone(const AppSettings& settings);
   void drawAnomaly(const AppSettings& settings);
+  void drawAcl(const AppSettings& settings);
   void drawNtpStats(const NtpServer& ntp);
   void drawMessage();
   void drawWebHint();
@@ -64,6 +67,7 @@ class DisplayUi {
   void handleSetIp(int8_t rot, bool click, bool longPress);
   void handleTimezone(int8_t rot, bool click);
   void handleAnomaly(int8_t rot, bool click, bool longPress);
+  void handleAcl(int8_t rot, bool click, bool longPress);
   void handleNtpStats(int8_t rot, bool click, bool longPress);
   void drainUiMessages();
 
@@ -78,6 +82,8 @@ class DisplayUi {
   uint8_t ipOctet_ = 0;
   IPAddress editIp_;
   AnomalyPolicy editPolicy_ = AnomalyPolicy::Refuse;
+  NtpAclMode editAclMode_ = NtpAclMode::Off;
+  uint8_t editAclCount_ = 0;
   String pendingSsid_;
   String message_;
   uint32_t messageUntil_ = 0;

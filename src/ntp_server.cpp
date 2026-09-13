@@ -6,6 +6,27 @@
 void NtpServer::begin() {
   udp_.begin(NTP_UDP_PORT);
   memset(clients_, 0, sizeof(clients_));
+  acl_ = NtpAclSnapshot{};
+}
+
+void NtpServer::setAcl(const NtpAclSnapshot& snap) {
+  acl_ = snap;
+  if (acl_.count > NTP_ACL_MAX_ENTRIES) {
+    acl_.count = NTP_ACL_MAX_ENTRIES;
+  }
+}
+
+bool NtpServer::aclAllows(uint32_t ip) const {
+  if (acl_.mode != NtpAclMode::AllowList) {
+    return true;
+  }
+  // Empty AllowList → deny all (fail closed when mode is on).
+  for (uint8_t i = 0; i < acl_.count; ++i) {
+    if (acl_.ips[i] == ip) {
+      return true;
+    }
+  }
+  return false;
 }
 
 void NtpServer::writeTimestamp(uint8_t* pkt, int offset, uint32_t sec, uint32_t frac) {
@@ -238,6 +259,13 @@ void NtpServer::handlePacket(const GpsService& gps) {
   const uint32_t ip = static_cast<uint32_t>(udp_.remoteIP());
   const uint8_t vn = (packet_[0] >> 3) & 0x07;
   const uint8_t poll = packet_[2];
+
+  // B3 ACL before rate accounting so scanners do not starve allowlisted clients.
+  if (!aclAllows(ip)) {
+    aclDeniedCount_++;
+    droppedCount_++;
+    return;
+  }
 
   if (!admitGlobal(nowMs)) {
     // Global flood: silent drop to protect task-time / PPS.

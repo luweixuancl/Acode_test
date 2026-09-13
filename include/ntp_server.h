@@ -4,19 +4,31 @@
 #include <WiFiUdp.h>
 #include "config.h"
 #include "gps_service.h"
+#include "settings.h"
+
+struct NtpAclSnapshot {
+  NtpAclMode mode = NtpAclMode::Off;
+  uint8_t count = 0;
+  uint32_t ips[NTP_ACL_MAX_ENTRIES] = {};
+};
 
 class NtpServer {
  public:
   void begin();
   // Call only from task-time.
   void loop(const GpsService& gps);
+  // Cached from settings by task-time (no mutex in packet path).
+  void setAcl(const NtpAclSnapshot& snap);
 
   uint32_t requestCount() const { return requestCount_; }
   uint32_t servedCount() const { return servedCount_; }
   uint32_t rateLimitedCount() const { return rateLimitedCount_; }
   uint32_t deniedCount() const { return deniedCount_; }
   uint32_t droppedCount() const { return droppedCount_; }
+  uint32_t aclDeniedCount() const { return aclDeniedCount_; }
   uint8_t activeClientCount() const;
+  NtpAclMode aclMode() const { return acl_.mode; }
+  uint8_t aclCount() const { return acl_.count; }
 
  private:
   enum class Admit : uint8_t { Allow = 0, Rate = 1, Deny = 2, Drop = 3 };
@@ -31,6 +43,7 @@ class NtpServer {
   };
 
   void handlePacket(const GpsService& gps);
+  bool aclAllows(uint32_t ip) const;
   Admit admitClient(uint32_t ip, uint32_t nowMs);
   bool admitGlobal(uint32_t nowMs);
   int findClientSlot(uint32_t ip, uint32_t nowMs);
@@ -43,12 +56,14 @@ class NtpServer {
   WiFiUDP udp_;
   uint8_t packet_[48];
   ClientSlot clients_[NTP_CLIENT_SLOTS];
+  NtpAclSnapshot acl_;
 
   uint32_t requestCount_ = 0;
   uint32_t servedCount_ = 0;
   uint32_t rateLimitedCount_ = 0;
   uint32_t deniedCount_ = 0;
   uint32_t droppedCount_ = 0;
+  uint32_t aclDeniedCount_ = 0;
 
   uint32_t globalWindowStartMs_ = 0;
   uint16_t globalWindowCount_ = 0;

@@ -3,7 +3,7 @@
 
 namespace {
 
-constexpr uint16_t kSettingsVer = 2;
+constexpr uint16_t kSettingsVer = 3;
 
 uint32_t settingsCrc(const AppSettings& s) {
   // CRC over critical fields so a torn NVS write can be detected.
@@ -17,6 +17,8 @@ uint32_t settingsCrc(const AppSettings& s) {
       static_cast<uint8_t>(s.timezoneHours),
       static_cast<uint8_t>(s.anomalyPolicy),
       static_cast<uint8_t>(s.autoReconnect ? 1 : 0),
+      static_cast<uint8_t>(s.ntpAclMode),
+      s.ntpAclCount,
   };
   crc = esp_crc32_le(crc, flags, sizeof(flags));
   const uint8_t ip[16] = {
@@ -28,6 +30,10 @@ uint32_t settingsCrc(const AppSettings& s) {
   crc = esp_crc32_le(crc, ip, sizeof(ip));
   const uint16_t hold = s.holdoverSec;
   crc = esp_crc32_le(crc, reinterpret_cast<const uint8_t*>(&hold), sizeof(hold));
+  for (uint8_t i = 0; i < s.ntpAclCount && i < NTP_ACL_MAX_ENTRIES; ++i) {
+    const uint8_t a[4] = {s.ntpAcl[i][0], s.ntpAcl[i][1], s.ntpAcl[i][2], s.ntpAcl[i][3]};
+    crc = esp_crc32_le(crc, a, sizeof(a));
+  }
   return crc;
 }
 
@@ -81,6 +87,21 @@ AppSettings SettingsStore::load() const {
     s.webPassword = "";
   }
 
+  const uint8_t aclm = static_cast<uint8_t>(prefs_.getUChar("aclm", 0));
+  s.ntpAclMode = (aclm == static_cast<uint8_t>(NtpAclMode::AllowList)) ? NtpAclMode::AllowList
+                                                                        : NtpAclMode::Off;
+  s.ntpAclCount = 0;
+  const uint8_t acln = static_cast<uint8_t>(prefs_.getUChar("acln", 0));
+  char key[8];
+  for (uint8_t i = 0; i < NTP_ACL_MAX_ENTRIES && i < acln; ++i) {
+    snprintf(key, sizeof(key), "acl%u", static_cast<unsigned>(i));
+    String dotted = prefs_.getString(key, "");
+    IPAddress ip;
+    if (!dotted.isEmpty() && ip.fromString(dotted) && static_cast<uint32_t>(ip) != 0) {
+      s.ntpAcl[s.ntpAclCount++] = ip;
+    }
+  }
+
   const uint16_t ver = prefs_.getUShort("ver", 0);
   const uint32_t storedCrc = prefs_.getUInt("crc", 0);
   // CRC is integrity hint only. NEVER clear WiFi on mismatch — that forced SoftAP
@@ -132,6 +153,17 @@ void SettingsStore::save(const AppSettings& s) const {
   prefs_.putBool("arec", s.autoReconnect);
   prefs_.putString("appw", s.apPassword);
   prefs_.putString("webpw", s.webPassword);
+  prefs_.putUChar("aclm", static_cast<uint8_t>(s.ntpAclMode));
+  prefs_.putUChar("acln", s.ntpAclCount);
+  char key[8];
+  for (uint8_t i = 0; i < NTP_ACL_MAX_ENTRIES; ++i) {
+    snprintf(key, sizeof(key), "acl%u", static_cast<unsigned>(i));
+    if (i < s.ntpAclCount) {
+      prefs_.putString(key, s.ntpAcl[i].toString());
+    } else {
+      prefs_.remove(key);
+    }
+  }
   prefs_.putUShort("ver", kSettingsVer);
   prefs_.putUInt("crc", settingsCrc(s));
 }

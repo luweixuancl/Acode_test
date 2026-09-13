@@ -48,6 +48,8 @@
 #define NTP_RATE_TO_DENY_MS        10000  // sustained over-limit → DENY cooldown
 #define NTP_DENY_COOLDOWN_MS       60000
 #define NTP_MAX_PACKETS_PER_LOOP       8
+// B3 ACL AllowList (exact IPv4; Off by default)
+#define NTP_ACL_MAX_ENTRIES            8
 
 // UI / timing
 #define DISPLAY_REFRESH_MS   250

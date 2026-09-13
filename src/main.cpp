@@ -314,11 +314,21 @@ static void taskTime(void* /*arg*/) {
   // and aborts Holdover mid-flight.
   AnomalyPolicy cachedPolicy = AnomalyPolicy::Refuse;
   uint16_t cachedHoldSec = CLK_HOLDOVER_SHORT_SEC;
+  NtpAclSnapshot cachedAcl;
   if (settingsLock(pdMS_TO_TICKS(100))) {
     cachedPolicy = gSettings.anomalyPolicy;
     cachedHoldSec = gSettings.holdoverSec;
+    cachedAcl.mode = gSettings.ntpAclMode;
+    cachedAcl.count = gSettings.ntpAclCount;
+    if (cachedAcl.count > NTP_ACL_MAX_ENTRIES) {
+      cachedAcl.count = NTP_ACL_MAX_ENTRIES;
+    }
+    for (uint8_t i = 0; i < cachedAcl.count; ++i) {
+      cachedAcl.ips[i] = static_cast<uint32_t>(gSettings.ntpAcl[i]);
+    }
     settingsUnlock();
   }
+  gNtp.setAcl(cachedAcl);
 
   for (;;) {
     ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1));
@@ -326,7 +336,16 @@ static void taskTime(void* /*arg*/) {
     if (settingsLock(0)) {
       cachedPolicy = gSettings.anomalyPolicy;
       cachedHoldSec = gSettings.holdoverSec;
+      cachedAcl.mode = gSettings.ntpAclMode;
+      cachedAcl.count = gSettings.ntpAclCount;
+      if (cachedAcl.count > NTP_ACL_MAX_ENTRIES) {
+        cachedAcl.count = NTP_ACL_MAX_ENTRIES;
+      }
+      for (uint8_t i = 0; i < cachedAcl.count; ++i) {
+        cachedAcl.ips[i] = static_cast<uint32_t>(gSettings.ntpAcl[i]);
+      }
       settingsUnlock();
+      gNtp.setAcl(cachedAcl);
     }
 
     gGps.loop(cachedPolicy, cachedHoldSec);

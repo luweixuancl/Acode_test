@@ -11,6 +11,7 @@ static const char* MENU_LABELS[] = {
     "Use DHCP",
     "Timezone",
     "Anomaly Mode",
+    "NTP ACL",
     "NTP Stats",
     "Restart",
 };
@@ -99,6 +100,9 @@ void DisplayUi::loop(EncoderInput& enc, GpsService& gps, WifiManager& wifi, NtpS
     case UiMode::SetAnomaly:
       handleAnomaly(rot, click, longPress);
       break;
+    case UiMode::SetAcl:
+      handleAcl(rot, click, longPress);
+      break;
     case UiMode::NtpStats:
       handleNtpStats(rot, click, longPress);
       break;
@@ -151,6 +155,9 @@ void DisplayUi::loop(EncoderInput& enc, GpsService& gps, WifiManager& wifi, NtpS
       break;
     case UiMode::SetAnomaly:
       drawAnomaly(settings);
+      break;
+    case UiMode::SetAcl:
+      drawAcl(settings);
       break;
     case UiMode::NtpStats:
       drawNtpStats(ntp);
@@ -394,6 +401,24 @@ void DisplayUi::drawAnomaly(const AppSettings& settings) {
   display_.println("long=back");
 }
 
+void DisplayUi::drawAcl(const AppSettings& settings) {
+  (void)settings;
+  display_.setCursor(0, 0);
+  display_.println("NTP ACL");
+  display_.setCursor(0, 14);
+  display_.print(">");
+  display_.println(ntpAclModeMenuLabel(editAclMode_));
+  display_.setCursor(0, 28);
+  display_.print("IPs: ");
+  display_.print(editAclCount_);
+  display_.print("/");
+  display_.println(NTP_ACL_MAX_ENTRIES);
+  display_.setCursor(0, 42);
+  display_.println("edit list via Web");
+  display_.setCursor(0, 54);
+  display_.println("rot=mode click=save");
+}
+
 void DisplayUi::drawNtpStats(const NtpServer& ntp) {
   display_.setCursor(0, 0);
   display_.println("NTP Stats");
@@ -405,7 +430,9 @@ void DisplayUi::drawNtpStats(const NtpServer& ntp) {
   display_.println(ntp.rateLimitedCount());
   display_.setCursor(0, 32);
   display_.print("DENY   ");
-  display_.println(ntp.deniedCount());
+  display_.print(ntp.deniedCount());
+  display_.print(" ACL ");
+  display_.println(ntp.aclDeniedCount());
   display_.setCursor(0, 42);
   display_.print("drop   ");
   display_.print(ntp.droppedCount());
@@ -502,6 +529,14 @@ void DisplayUi::handleMenu(int8_t rot, bool click, bool longPress) {
         settingsUnlock();
       }
       mode_ = UiMode::SetAnomaly;
+      break;
+    case MenuItem::NtpAcl:
+      if (settingsLock(pdMS_TO_TICKS(50))) {
+        editAclMode_ = gSettings.ntpAclMode;
+        editAclCount_ = gSettings.ntpAclCount;
+        settingsUnlock();
+      }
+      mode_ = UiMode::SetAcl;
       break;
     case MenuItem::NtpStats:
       mode_ = UiMode::NtpStats;
@@ -668,6 +703,31 @@ void DisplayUi::handleAnomaly(int8_t rot, bool click, bool longPress) {
       gStore.save(copy);
     }
     showMessage(String("A:") + anomalyPolicyShortLabel(editPolicy_));
+  }
+}
+
+void DisplayUi::handleAcl(int8_t rot, bool click, bool longPress) {
+  if (longPress) {
+    mode_ = UiMode::Menu;
+    return;
+  }
+  if (rot != 0) {
+    editAclMode_ = (editAclMode_ == NtpAclMode::Off) ? NtpAclMode::AllowList : NtpAclMode::Off;
+  }
+  if (click) {
+    AppSettings copy;
+    bool locked = false;
+    if (settingsLock(pdMS_TO_TICKS(100))) {
+      gSettings.ntpAclMode = editAclMode_;
+      editAclCount_ = gSettings.ntpAclCount;
+      copy = gSettings;
+      settingsUnlock();
+      locked = true;
+    }
+    if (locked) {
+      gStore.save(copy);
+    }
+    showMessage(String("ACL:") + ntpAclModeMenuLabel(editAclMode_));
   }
 }
 

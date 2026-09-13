@@ -101,6 +101,8 @@ GPS 锁定且 PPS 正常时，应答为 **stratum 1**，Reference ID 为 `GPSS`�
 
 限流（阶段 B1）：每 IP 默认 4 req/s，超限回 KoD `RATE`；持续超限约 10s 后 KoD `DENY` 并冷静丢弃约 60s；全局约 32 req/s 静默丢弃。`/status` 字段 `served` / `rateLimited` / `denied` / `dropped` / `clients`。OLED 菜单 **NTP Stats**；`http://<ip>/metrics` 文本指标（只读，无口令）。
 
+ACL 白名单（阶段 B3）：默认 **Off**。开启 AllowList 后仅列出的 IPv4（最多 8 条）可取时，未命中静默丢弃；空列表=拒绝全部。OLED **NTP ACL** 切换模式；IP 列表在 `/setup` 编辑。`/status` 含 `ntpAclMode` / `ntpAcl` / `ntp.aclDenied`。
+
 Windows 下若工程路径含非 ASCII 字符导致链接失败，可用 ASCII junction（如 `C:\acode_leds`）再 `pio run`。
 
 ## 目录结构

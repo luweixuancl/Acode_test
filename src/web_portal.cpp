@@ -214,16 +214,25 @@ void WebPortal::handleRoot() {
 
 void WebPortal::handleSetup() {
   uint8_t apol = 0;
+  uint8_t aclm = 0;
+  String aclLines;
   String savedSsid;
   bool haveSaved = false;
   if (settingsLock(pdMS_TO_TICKS(50))) {
     apol = static_cast<uint8_t>(gSettings.anomalyPolicy);
+    aclm = static_cast<uint8_t>(gSettings.ntpAclMode);
+    for (uint8_t i = 0; i < gSettings.ntpAclCount && i < NTP_ACL_MAX_ENTRIES; ++i) {
+      if (i) {
+        aclLines += '\n';
+      }
+      aclLines += gSettings.ntpAcl[i].toString();
+    }
     savedSsid = gSettings.wifiSsid;
     haveSaved = !savedSsid.isEmpty();
     settingsUnlock();
   }
   String body;
-  body.reserve(3800);
+  body.reserve(4800);
   body += F("<h1>NTP 设置</h1><p><a href='/'>返回状态</a></p>");
   body += F("<div class='card'><h2 style='font-size:1rem;margin:0 0 8px'>管理口令</h2>"
             "<p style='color:#64748b;font-size:.85rem'>写操作需要口令（默认 SoftAP："
@@ -251,6 +260,17 @@ void WebPortal::handleSetup() {
             "</select>"
             "<button onclick='savePolicy()'>保存策略</button>"
             "<p id='pmsg'></p></div>");
+  body += F("<div class='card'><h2 style='font-size:1rem;margin:0 0 8px'>NTP ACL 白名单</h2>"
+            "<p style='color:#64748b;font-size:.85rem'>默认 Off。开启 AllowList 后仅列出的 IPv4 可取时"
+            "（最多 8 条；未命中静默丢弃；空列表=拒绝全部）。</p>"
+            "<label>模式</label><select id='aclm'>"
+            "<option value='0'>Off（不限制）</option>"
+            "<option value='1'>AllowList</option>"
+            "</select>"
+            "<label>允许的 IP（每行一个）</label>"
+            "<textarea id='acllist' rows='5' style='width:100%;font-family:monospace'></textarea>"
+            "<button onclick='saveAcl()'>保存 ACL</button>"
+            "<p id='amsg'></p></div>");
   body += F("<div class='card'><h2 style='font-size:1rem;margin:0 0 8px'>WiFi 配网</h2>"
             "<p>扫描热点，选择 SSID，输入密码后连接。</p>"
             "<button onclick='scan()'>扫描 WiFi</button>"
@@ -298,9 +318,30 @@ void WebPortal::handleSetup() {
             " const r=await fetch('/save',{method:'POST',headers:{'Content-Type':'application/json'},body});"
             " document.getElementById('pmsg').textContent=await r.text();"
             "}"
+            "async function saveAcl(){"
+            " const ntpAclMode=parseInt(document.getElementById('aclm').value,10);"
+            " const ntpAcl=document.getElementById('acllist').value.split(/\\r?\\n/)"
+            "  .map(s=>s.trim()).filter(s=>s.length>0);"
+            " const body=JSON.stringify(authBody({ntpAclMode,ntpAcl}));"
+            " const r=await fetch('/save',{method:'POST',headers:{'Content-Type':'application/json'},body});"
+            " document.getElementById('amsg').textContent=await r.text();"
+            "}"
             "document.getElementById('apol').value='");
   body += String(apol);
-  body += F("';");
+  body += F("';"
+            "document.getElementById('aclm').value='");
+  body += String(aclm);
+  body += F("';"
+            "document.getElementById('acllist').value=");
+  // JSON-encode the ACL lines for safe JS string.
+  {
+    JsonDocument tmp;
+    tmp.set(aclLines);
+    String enc;
+    serializeJson(tmp, enc);
+    body += enc;
+  }
+  body += F(";");
   if (!haveSaved) {
     body += F("scan();");
   }
@@ -452,6 +493,45 @@ void WebPortal::handleSave() {
     }
   }
 
+  bool savedAcl = false;
+  const bool haveAclMode = !doc["ntpAclMode"].isNull();
+  const bool haveAclList = doc["ntpAcl"].is<JsonArray>();
+  if (haveAclMode || haveAclList) {
+    AppSettings copy;
+    bool locked = false;
+    if (settingsLock(pdMS_TO_TICKS(200))) {
+      if (haveAclMode) {
+        const int m = doc["ntpAclMode"].as<int>();
+        gSettings.ntpAclMode =
+            (m == static_cast<int>(NtpAclMode::AllowList)) ? NtpAclMode::AllowList : NtpAclMode::Off;
+      }
+      if (haveAclList) {
+        JsonArray arr = doc["ntpAcl"].as<JsonArray>();
+        uint8_t n = 0;
+        for (JsonVariant v : arr) {
+          if (n >= NTP_ACL_MAX_ENTRIES) {
+            break;
+          }
+          if (!v.is<const char*>()) {
+            continue;
+          }
+          IPAddress ip;
+          if (ip.fromString(v.as<const char*>()) && static_cast<uint32_t>(ip) != 0) {
+            gSettings.ntpAcl[n++] = ip;
+          }
+        }
+        gSettings.ntpAclCount = n;
+      }
+      copy = gSettings;
+      settingsUnlock();
+      locked = true;
+    }
+    if (locked) {
+      gStore.save(copy);
+      savedAcl = true;
+    }
+  }
+
   // Only touch WiFi creds when ssid is a real JSON string (not missing/null).
   if (doc["ssid"].is<const char*>()) {
     pendingSsid_ = doc["ssid"].as<const char*>();
@@ -478,11 +558,15 @@ void WebPortal::handleSave() {
     }
   }
 
-  if (savedPolicy || touchMgmt) {
-    server_.send(200, "text/plain", savedPolicy ? "Policy saved" : "Password updated");
+  if (savedPolicy || touchMgmt || savedAcl) {
+    if (savedAcl) {
+      server_.send(200, "text/plain", "ACL saved");
+    } else {
+      server_.send(200, "text/plain", savedPolicy ? "Policy saved" : "Password updated");
+    }
     return;
   }
-  server_.send(400, "text/plain", "SSID or anomalyPolicy required");
+  server_.send(400, "text/plain", "SSID or anomalyPolicy or ntpAcl required");
 }
 
 void WebPortal::handleStatus() {
@@ -499,11 +583,22 @@ void WebPortal::handleStatus() {
   AnomalyPolicy apol = AnomalyPolicy::Refuse;
   uint16_t hold = 0;
   String savedSsid;
+  NtpAclMode aclMode = NtpAclMode::Off;
+  uint8_t aclCount = 0;
+  IPAddress aclIps[NTP_ACL_MAX_ENTRIES];
   if (settingsLock(pdMS_TO_TICKS(20))) {
     doc["tzHours"] = gSettings.timezoneHours;
     apol = gSettings.anomalyPolicy;
     hold = gSettings.holdoverSec;
     savedSsid = gSettings.wifiSsid;
+    aclMode = gSettings.ntpAclMode;
+    aclCount = gSettings.ntpAclCount;
+    if (aclCount > NTP_ACL_MAX_ENTRIES) {
+      aclCount = NTP_ACL_MAX_ENTRIES;
+    }
+    for (uint8_t i = 0; i < aclCount; ++i) {
+      aclIps[i] = gSettings.ntpAcl[i];
+    }
     settingsUnlock();
   } else {
     doc["tzHours"] = 8;
@@ -514,6 +609,14 @@ void WebPortal::handleStatus() {
   doc["savedSsid"] = savedSsid;
   doc["hasSavedWifi"] = !savedSsid.isEmpty();
   doc["softApPasswordDefault"] = derivedSoftApPassword();
+  doc["ntpAclMode"] = static_cast<uint8_t>(aclMode);
+  doc["ntpAclLabel"] = ntpAclModeMenuLabel(aclMode);
+  {
+    JsonArray arr = doc["ntpAcl"].to<JsonArray>();
+    for (uint8_t i = 0; i < aclCount; ++i) {
+      arr.add(aclIps[i].toString());
+    }
+  }
 
   const GpsStatus st = gps_ ? gps_->snapshot() : GpsStatus{};
   JsonObject gps = doc["gps"].to<JsonObject>();
@@ -551,6 +654,7 @@ void WebPortal::handleStatus() {
   ntp["rateLimited"] = ntp_ ? ntp_->rateLimitedCount() : 0;
   ntp["denied"] = ntp_ ? ntp_->deniedCount() : 0;
   ntp["dropped"] = ntp_ ? ntp_->droppedCount() : 0;
+  ntp["aclDenied"] = ntp_ ? ntp_->aclDeniedCount() : 0;
   ntp["clients"] = ntp_ ? ntp_->activeClientCount() : 0;
 
   String out;
@@ -560,14 +664,17 @@ void WebPortal::handleStatus() {
 
 void WebPortal::handleMetrics() {
   // Prometheus-ish text; no auth (read-only, same as /status).
-  char buf[480];
+  char buf[640];
   const uint32_t served = ntp_ ? ntp_->servedCount() : 0;
   const uint32_t rate = ntp_ ? ntp_->rateLimitedCount() : 0;
   const uint32_t denied = ntp_ ? ntp_->deniedCount() : 0;
   const uint32_t dropped = ntp_ ? ntp_->droppedCount() : 0;
+  const uint32_t aclDenied = ntp_ ? ntp_->aclDeniedCount() : 0;
   const uint32_t reqs = ntp_ ? ntp_->requestCount() : 0;
   const uint8_t clients = ntp_ ? ntp_->activeClientCount() : 0;
   const unsigned heap = ESP.getFreeHeap();
+  const unsigned aclMode = ntp_ ? static_cast<unsigned>(ntp_->aclMode()) : 0;
+  const unsigned aclCount = ntp_ ? ntp_->aclCount() : 0;
   snprintf(buf, sizeof(buf),
            "# TYPE ntp_requests_total counter\n"
            "ntp_requests_total %lu\n"
@@ -579,12 +686,19 @@ void WebPortal::handleMetrics() {
            "ntp_denied_total %lu\n"
            "# TYPE ntp_dropped_total counter\n"
            "ntp_dropped_total %lu\n"
+           "# TYPE ntp_acl_denied_total counter\n"
+           "ntp_acl_denied_total %lu\n"
+           "# TYPE ntp_acl_mode gauge\n"
+           "ntp_acl_mode %u\n"
+           "# TYPE ntp_acl_entries gauge\n"
+           "ntp_acl_entries %u\n"
            "# TYPE ntp_clients gauge\n"
            "ntp_clients %u\n"
            "# TYPE esp_free_heap_bytes gauge\n"
            "esp_free_heap_bytes %u\n",
            static_cast<unsigned long>(reqs), static_cast<unsigned long>(served),
            static_cast<unsigned long>(rate), static_cast<unsigned long>(denied),
-           static_cast<unsigned long>(dropped), static_cast<unsigned>(clients), heap);
+           static_cast<unsigned long>(dropped), static_cast<unsigned long>(aclDenied), aclMode,
+           aclCount, static_cast<unsigned>(clients), heap);
   server_.send(200, "text/plain; charset=utf-8", buf);
 }
