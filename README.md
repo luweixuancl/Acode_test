@@ -111,6 +111,19 @@ ntpdate -q <设备IP>
 chronyc sources
 ```
 
+安卓 Termux 与阿里云比对（仅 Python 标准库）：
+
+```bash
+pkg install python
+curl -L -o ntp_cmp_termux.py \
+  https://ghproxy.net/https://raw.githubusercontent.com/luweixuancl/Acode_test/cursor/ntp-phase-a-metadata-c502/tools/ntp_cmp_termux.py
+python ntp_cmp_termux.py --gps 10.81.127.143
+# 冒烟约 1 分钟：
+python ntp_cmp_termux.py --quick
+```
+
+默认 10 分钟、每 10 秒一轮，同时打设备 UDP/123 与 `ntp.aliyun.com`，并读 `/status` 时钟态。CSV 写在当前目录。手机须与设备同一 2.4 GHz WiFi。
+
 GPS 锁定且 PPS 正常时，应答为 **stratum 1**，Reference ID 为 `GPSS`。未同步时 LI=3 / stratum 16 / RefID `INIT`；Holdover 时仍 **LI=0**（闰秒告警位不复用），靠抬高 root dispersion 与 `/status` 的 `clock.state=HLD` 标明守时。
 
 限流（阶段 B1）：每 IP 默认 4 req/s，超限回 KoD `RATE`；持续超限约 10s 后 KoD `DENY` 并冷静丢弃约 60s；全局约 32 req/s 静默丢弃。`/status` 字段 `served` / `rateLimited` / `denied` / `dropped` / `clients`。OLED 菜单 **NTP Stats**；`http://<ip>/metrics` 文本指标（只读，无口令）。
