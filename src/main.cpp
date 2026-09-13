@@ -314,10 +314,14 @@ static void taskTime(void* /*arg*/) {
   // and aborts Holdover mid-flight.
   AnomalyPolicy cachedPolicy = AnomalyPolicy::Refuse;
   uint16_t cachedHoldSec = CLK_HOLDOVER_SHORT_SEC;
+  bool cachedTempComp = false;
+  int16_t cachedTempCoeff = CLK_TEMP_COEFF_CENTI;
   NtpAclSnapshot cachedAcl;
   if (settingsLock(pdMS_TO_TICKS(100))) {
     cachedPolicy = gSettings.anomalyPolicy;
     cachedHoldSec = gSettings.holdoverSec;
+    cachedTempComp = gSettings.tempComp;
+    cachedTempCoeff = gSettings.tempCoeffCenti;
     cachedAcl.mode = gSettings.ntpAclMode;
     cachedAcl.count = gSettings.ntpAclCount;
     if (cachedAcl.count > NTP_ACL_MAX_ENTRIES) {
@@ -329,6 +333,7 @@ static void taskTime(void* /*arg*/) {
     settingsUnlock();
   }
   gNtp.setAcl(cachedAcl);
+  gGps.setTempComp(cachedTempComp, cachedTempCoeff);
 
   for (;;) {
     ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1));
@@ -336,6 +341,8 @@ static void taskTime(void* /*arg*/) {
     if (settingsLock(0)) {
       cachedPolicy = gSettings.anomalyPolicy;
       cachedHoldSec = gSettings.holdoverSec;
+      cachedTempComp = gSettings.tempComp;
+      cachedTempCoeff = gSettings.tempCoeffCenti;
       cachedAcl.mode = gSettings.ntpAclMode;
       cachedAcl.count = gSettings.ntpAclCount;
       if (cachedAcl.count > NTP_ACL_MAX_ENTRIES) {
@@ -346,6 +353,7 @@ static void taskTime(void* /*arg*/) {
       }
       settingsUnlock();
       gNtp.setAcl(cachedAcl);
+      gGps.setTempComp(cachedTempComp, cachedTempCoeff);
     }
 
     gGps.loop(cachedPolicy, cachedHoldSec);
@@ -360,7 +368,7 @@ static void taskTime(void* /*arg*/) {
         const GpsStatus st = gGps.snapshot();
         Serial.printf(
             "[ntp] req=%lu served=%lu RATE=%lu DENY=%lu drop=%lu aclDeny=%lu "
-            "clients=%u acl=%s/%u clk=%s\n",
+            "clients=%u acl=%s/%u clk=%s T=%.1f dppm=%.2f\n",
             static_cast<unsigned long>(gNtp.requestCount()),
             static_cast<unsigned long>(gNtp.servedCount()),
             static_cast<unsigned long>(gNtp.rateLimitedCount()),
@@ -369,7 +377,8 @@ static void taskTime(void* /*arg*/) {
             static_cast<unsigned long>(gNtp.aclDeniedCount()),
             static_cast<unsigned>(gNtp.activeClientCount()),
             ntpAclModeMenuLabel(gNtp.aclMode()), static_cast<unsigned>(gNtp.aclCount()),
-            clockStateLabel(st.clockState));
+            clockStateLabel(st.clockState), static_cast<double>(st.tempC),
+            static_cast<double>(st.tempCorrPpm));
       }
     }
 #endif

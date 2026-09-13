@@ -1,5 +1,6 @@
 #include "gps_service.h"
 #include <esp_timer.h>
+#include "driver/temp_sensor.h"
 
 portMUX_TYPE GpsService::ppsMux_ = portMUX_INITIALIZER_UNLOCKED;
 volatile uint32_t GpsService::ppsCount_ = 0;
@@ -40,11 +41,38 @@ void GpsService::begin() {
   gpsSerial_.setRxBufferSize(2048);
   gpsSerial_.begin(GPS_UART_BAUD, SERIAL_8N1, PIN_GPS_RX, PIN_GPS_TX);
   attachInterrupt(digitalPinToInterrupt(PIN_GPS_PPS), onPpsIsr, RISING);
-  Serial.printf("GPS UART%d RX=%d TX=%d baud=%d buf=2048 local-clock=on ppsQ=%d\n", GPS_UART_NUM,
-                PIN_GPS_RX, PIN_GPS_TX, GPS_UART_BAUD, GPS_PPS_ISR_QUEUE);
+  {
+    temp_sensor_config_t tsens = TSENS_CONFIG_DEFAULT();
+    temp_sensor_set_config(tsens);
+    const esp_err_t err = temp_sensor_start();
+    tempSensorOk_ = (err == ESP_OK || err == ESP_ERR_INVALID_STATE);
+    Serial.printf("GPS UART%d RX=%d TX=%d baud=%d buf=2048 local-clock=on ppsQ=%d tsens=%d\n",
+                  GPS_UART_NUM, PIN_GPS_RX, PIN_GPS_TX, GPS_UART_BAUD, GPS_PPS_ISR_QUEUE,
+                  tempSensorOk_ ? 1 : 0);
+  }
+}
+
+void GpsService::setTempComp(bool enabled, int16_t coeffCenti) {
+  localClock_.setTempComp(enabled, coeffCenti);
+}
+
+void GpsService::sampleDieTemp() {
+  if (!tempSensorOk_) {
+    return;
+  }
+  const uint32_t now = millis();
+  if (lastTempMs_ != 0 && (now - lastTempMs_) < CLK_TEMP_SAMPLE_MS) {
+    return;
+  }
+  lastTempMs_ = now;
+  float c = NAN;
+  if (temp_sensor_read_celsius(&c) == ESP_OK) {
+    localClock_.updateDieTemp(c);
+  }
 }
 
 void GpsService::loop(AnomalyPolicy policy, uint16_t holdoverSec) {
+  sampleDieTemp();
   parseNmea();
 
   // Drain every queued PPS edge (WiFi may delay task-time by >1s).
@@ -131,6 +159,9 @@ void GpsService::loop(AnomalyPolicy policy, uint16_t holdoverSec) {
   work.clockState = localClock_.state();
   work.residualMs = localClock_.residualMs();
   work.freqPpm = localClock_.freqPpm();
+  work.tempC = localClock_.dieTempC();
+  work.tempCorrPpm = localClock_.tempCorrPpm();
+  work.tempComp = localClock_.tempCompEnabled();
   work.holdoverMs = localClock_.holdoverElapsedMs();
 
   publishStatus(work);

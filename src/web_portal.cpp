@@ -5,6 +5,7 @@
 #include "ntp_server.h"
 #include <ArduinoJson.h>
 #include <WiFi.h>
+#include <math.h>
 #include <time.h>
 
 namespace {
@@ -215,12 +216,16 @@ void WebPortal::handleRoot() {
 void WebPortal::handleSetup() {
   uint8_t apol = 0;
   uint8_t aclm = 0;
+  bool tcmp = false;
+  int16_t tcpc = CLK_TEMP_COEFF_CENTI;
   String aclLines;
   String savedSsid;
   bool haveSaved = false;
   if (settingsLock(pdMS_TO_TICKS(50))) {
     apol = static_cast<uint8_t>(gSettings.anomalyPolicy);
     aclm = static_cast<uint8_t>(gSettings.ntpAclMode);
+    tcmp = gSettings.tempComp;
+    tcpc = gSettings.tempCoeffCenti;
     for (uint8_t i = 0; i < gSettings.ntpAclCount && i < NTP_ACL_MAX_ENTRIES; ++i) {
       if (i) {
         aclLines += '\n';
@@ -232,7 +237,7 @@ void WebPortal::handleSetup() {
     settingsUnlock();
   }
   String body;
-  body.reserve(4800);
+  body.reserve(5600);
   body += F("<h1>NTP 设置</h1><p><a href='/'>返回状态</a></p>");
   body += F("<div class='card'><h2 style='font-size:1rem;margin:0 0 8px'>管理口令</h2>"
             "<p style='color:#64748b;font-size:.85rem'>写操作需要口令（默认 SoftAP："
@@ -271,6 +276,17 @@ void WebPortal::handleSetup() {
             "<textarea id='acllist' rows='5' style='width:100%;font-family:monospace'></textarea>"
             "<button onclick='saveAcl()'>保存 ACL</button>"
             "<p id='amsg'></p></div>");
+  body += F("<div class='card'><h2 style='font-size:1rem;margin:0 0 8px'>晶振温度补偿</h2>"
+            "<p style='color:#64748b;font-size:.85rem'>默认关。用片上温度对 Holdover 外推做一阶 "
+            "ppm/°C 修正（相对最近 PPS 估频时的温度）。系数可改，默认 -0.50。</p>"
+            "<label>模式</label><select id='tcmp'>"
+            "<option value='0'>Off</option>"
+            "<option value='1'>On</option>"
+            "</select>"
+            "<label>系数 ppm/°C</label>"
+            "<input id='tcpc' type='number' step='0.01'>"
+            "<button onclick='saveTemp()'>保存温度补偿</button>"
+            "<p id='tmsg'></p></div>");
   body += F("<div class='card'><h2 style='font-size:1rem;margin:0 0 8px'>WiFi 配网</h2>"
             "<p>扫描热点，选择 SSID，输入密码后连接。</p>"
             "<button onclick='scan()'>扫描 WiFi</button>"
@@ -326,11 +342,28 @@ void WebPortal::handleSetup() {
             " const r=await fetch('/save',{method:'POST',headers:{'Content-Type':'application/json'},body});"
             " document.getElementById('amsg').textContent=await r.text();"
             "}"
+            "async function saveTemp(){"
+            " const tempComp=parseInt(document.getElementById('tcmp').value,10)===1;"
+            " const tempCoeff=parseFloat(document.getElementById('tcpc').value);"
+            " const body=JSON.stringify(authBody({tempComp,tempCoeff}));"
+            " const r=await fetch('/save',{method:'POST',headers:{'Content-Type':'application/json'},body});"
+            " document.getElementById('tmsg').textContent=await r.text();"
+            "}"
             "document.getElementById('apol').value='");
   body += String(apol);
   body += F("';"
             "document.getElementById('aclm').value='");
   body += String(aclm);
+  body += F("';"
+            "document.getElementById('tcmp').value='");
+  body += String(tcmp ? 1 : 0);
+  body += F("';"
+            "document.getElementById('tcpc').value='");
+  {
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%.2f", static_cast<double>(tempCoeffPpmPerC(tcpc)));
+    body += buf;
+  }
   body += F("';"
             "document.getElementById('acllist').value=");
   // JSON-encode the ACL lines for safe JS string.
@@ -532,6 +565,36 @@ void WebPortal::handleSave() {
     }
   }
 
+  bool savedTemp = false;
+  const bool haveTempComp = !doc["tempComp"].isNull();
+  const bool haveTempCoeff = !doc["tempCoeff"].isNull();
+  if (haveTempComp || haveTempCoeff) {
+    AppSettings copy;
+    bool locked = false;
+    if (settingsLock(pdMS_TO_TICKS(200))) {
+      if (haveTempComp) {
+        gSettings.tempComp = doc["tempComp"].as<bool>();
+      }
+      if (haveTempCoeff) {
+        float k = doc["tempCoeff"].as<float>();
+        if (k < -5.0f) {
+          k = -5.0f;
+        }
+        if (k > 5.0f) {
+          k = 5.0f;
+        }
+        gSettings.tempCoeffCenti = static_cast<int16_t>(lroundf(k * 100.0f));
+      }
+      copy = gSettings;
+      settingsUnlock();
+      locked = true;
+    }
+    if (locked) {
+      gStore.save(copy);
+      savedTemp = true;
+    }
+  }
+
   // Only touch WiFi creds when ssid is a real JSON string (not missing/null).
   if (doc["ssid"].is<const char*>()) {
     pendingSsid_ = doc["ssid"].as<const char*>();
@@ -558,8 +621,10 @@ void WebPortal::handleSave() {
     }
   }
 
-  if (savedPolicy || touchMgmt || savedAcl) {
-    if (savedAcl) {
+  if (savedPolicy || touchMgmt || savedAcl || savedTemp) {
+    if (savedTemp) {
+      server_.send(200, "text/plain", "Temp comp saved");
+    } else if (savedAcl) {
       server_.send(200, "text/plain", "ACL saved");
     } else {
       server_.send(200, "text/plain", savedPolicy ? "Policy saved" : "Password updated");
@@ -585,12 +650,16 @@ void WebPortal::handleStatus() {
   String savedSsid;
   NtpAclMode aclMode = NtpAclMode::Off;
   uint8_t aclCount = 0;
+  bool tcmp = false;
+  int16_t tcpc = CLK_TEMP_COEFF_CENTI;
   IPAddress aclIps[NTP_ACL_MAX_ENTRIES];
   if (settingsLock(pdMS_TO_TICKS(20))) {
     doc["tzHours"] = gSettings.timezoneHours;
     apol = gSettings.anomalyPolicy;
     hold = gSettings.holdoverSec;
     savedSsid = gSettings.wifiSsid;
+    tcmp = gSettings.tempComp;
+    tcpc = gSettings.tempCoeffCenti;
     aclMode = gSettings.ntpAclMode;
     aclCount = gSettings.ntpAclCount;
     if (aclCount > NTP_ACL_MAX_ENTRIES) {
@@ -611,6 +680,8 @@ void WebPortal::handleStatus() {
   doc["softApPasswordDefault"] = derivedSoftApPassword();
   doc["ntpAclMode"] = static_cast<uint8_t>(aclMode);
   doc["ntpAclLabel"] = ntpAclModeMenuLabel(aclMode);
+  doc["tempComp"] = tcmp;
+  doc["tempCoeff"] = tempCoeffPpmPerC(tcpc);
   {
     JsonArray arr = doc["ntpAcl"].to<JsonArray>();
     for (uint8_t i = 0; i < aclCount; ++i) {
@@ -637,6 +708,9 @@ void WebPortal::handleStatus() {
   clock["stateCode"] = static_cast<uint8_t>(st.clockState);
   clock["residualMs"] = st.residualMs;
   clock["freqPpm"] = st.freqPpm;
+  clock["tempC"] = st.tempC;
+  clock["tempCorrPpm"] = st.tempCorrPpm;
+  clock["tempComp"] = st.tempComp;
   clock["holdoverMs"] = st.holdoverMs;
 
   JsonObject ntp = doc["ntp"].to<JsonObject>();

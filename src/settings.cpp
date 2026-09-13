@@ -3,7 +3,7 @@
 
 namespace {
 
-constexpr uint16_t kSettingsVer = 3;
+constexpr uint16_t kSettingsVer = 4;
 
 uint32_t settingsCrc(const AppSettings& s) {
   // CRC over critical fields so a torn NVS write can be detected.
@@ -19,6 +19,7 @@ uint32_t settingsCrc(const AppSettings& s) {
       static_cast<uint8_t>(s.autoReconnect ? 1 : 0),
       static_cast<uint8_t>(s.ntpAclMode),
       s.ntpAclCount,
+      static_cast<uint8_t>(s.tempComp ? 1 : 0),
   };
   crc = esp_crc32_le(crc, flags, sizeof(flags));
   const uint8_t ip[16] = {
@@ -30,6 +31,8 @@ uint32_t settingsCrc(const AppSettings& s) {
   crc = esp_crc32_le(crc, ip, sizeof(ip));
   const uint16_t hold = s.holdoverSec;
   crc = esp_crc32_le(crc, reinterpret_cast<const uint8_t*>(&hold), sizeof(hold));
+  const int16_t tc = s.tempCoeffCenti;
+  crc = esp_crc32_le(crc, reinterpret_cast<const uint8_t*>(&tc), sizeof(tc));
   for (uint8_t i = 0; i < s.ntpAclCount && i < NTP_ACL_MAX_ENTRIES; ++i) {
     const uint8_t a[4] = {s.ntpAcl[i][0], s.ntpAcl[i][1], s.ntpAcl[i][2], s.ntpAcl[i][3]};
     crc = esp_crc32_le(crc, a, sizeof(a));
@@ -102,6 +105,15 @@ AppSettings SettingsStore::load() const {
     }
   }
 
+  s.tempComp = prefs_.getBool("tcmp", static_cast<bool>(CLK_TEMP_COMP_DEFAULT));
+  s.tempCoeffCenti = static_cast<int16_t>(prefs_.getShort("tcpc", CLK_TEMP_COEFF_CENTI));
+  if (s.tempCoeffCenti < -500) {
+    s.tempCoeffCenti = -500;
+  }
+  if (s.tempCoeffCenti > 500) {
+    s.tempCoeffCenti = 500;
+  }
+
   const uint16_t ver = prefs_.getUShort("ver", 0);
   const uint32_t storedCrc = prefs_.getUInt("crc", 0);
   // CRC is integrity hint only. NEVER clear WiFi on mismatch — that forced SoftAP
@@ -164,6 +176,8 @@ void SettingsStore::save(const AppSettings& s) const {
       prefs_.remove(key);
     }
   }
+  prefs_.putBool("tcmp", s.tempComp);
+  prefs_.putShort("tcpc", s.tempCoeffCenti);
   prefs_.putUShort("ver", kSettingsVer);
   prefs_.putUInt("crc", settingsCrc(s));
 }

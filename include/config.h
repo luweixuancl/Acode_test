@@ -94,6 +94,11 @@
 #define CLK_PPM_EMA_ALPHA          0.2f
 // Average this many 1s PPS intervals before EMA (needs span+1 edges).
 #define CLK_PPM_SPAN_SEC              8
+// Optional die-temp first-order ppm trim (NVS tcmp, default Off).
+#define CLK_TEMP_COMP_DEFAULT         0
+#define CLK_TEMP_COEFF_CENTI       (-50)  // -0.50 ppm/°C (coarse die↔XO proxy)
+#define CLK_TEMP_CORR_MAX_PPM      20.0f
+#define CLK_TEMP_SAMPLE_MS         1000
 // Below this residual while Locked, keep PPS-only advance (no NMEA re-anchor).
 #define CLK_LOCKED_SLEW_MS            5
 // ISR→task PPS queue (missed edges under WiFi load).

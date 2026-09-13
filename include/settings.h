@@ -81,7 +81,14 @@ struct AppSettings {
   NtpAclMode ntpAclMode = NtpAclMode::Off;
   uint8_t ntpAclCount = 0;
   IPAddress ntpAcl[NTP_ACL_MAX_ENTRIES];
+  // Optional crystal temp trim (NVS tcmp / tcpc). Default Off.
+  bool tempComp = CLK_TEMP_COMP_DEFAULT;
+  int16_t tempCoeffCenti = CLK_TEMP_COEFF_CENTI;  // ppm/°C × 100
 };
+
+inline float tempCoeffPpmPerC(int16_t centi) {
+  return static_cast<float>(centi) / 100.0f;
+}
 
 // SoftAP / web-write password helpers (B2).
 inline String derivedSoftApPassword() {

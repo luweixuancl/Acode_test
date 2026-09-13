@@ -17,6 +17,7 @@ void LocalClock::reset() {
   holdoverStartUs_ = 0;
   lastEdgeUs_ = 0;
   lastPpsCount_ = 0;
+  haveTempRef_ = false;
 }
 
 void LocalClock::pushEdge(uint64_t edgeUs) {
@@ -52,6 +53,11 @@ void LocalClock::updatePpmFromRing() {
   // err (µs) over span seconds → ppm.
   const float samplePpm = static_cast<float>(err) / static_cast<float>(span);
   freqPpm_ = freqPpm_ * (1.0f - CLK_PPM_EMA_ALPHA) + samplePpm * CLK_PPM_EMA_ALPHA;
+  // Measured slope already includes current die temp — rebase the trim.
+  if (haveTemp_) {
+    tempRefC_ = tempC_;
+    haveTempRef_ = true;
+  }
 }
 
 void LocalClock::onPpsEdge(uint64_t edgeUs, uint32_t ppsCount) {
@@ -124,11 +130,48 @@ void LocalClock::setAnchor(uint32_t utcSec, uint64_t edgeUs, uint32_t /*ppsCount
   anchorEdgeUs_ = edgeUs;
 }
 
+void LocalClock::setTempComp(bool enabled, int16_t coeffCenti) {
+  tempComp_ = enabled;
+  if (coeffCenti < -500) {
+    coeffCenti = -500;
+  }
+  if (coeffCenti > 500) {
+    coeffCenti = 500;
+  }
+  tempCoeffCenti_ = coeffCenti;
+}
+
+void LocalClock::updateDieTemp(float tempC) {
+  if (!isfinite(tempC) || tempC < -40.0f || tempC > 125.0f) {
+    return;
+  }
+  tempC_ = tempC;
+  haveTemp_ = true;
+}
+
+float LocalClock::tempCorrPpm() const {
+  if (!tempComp_ || !haveTemp_ || !haveTempRef_) {
+    return 0.0f;
+  }
+  float corr = tempCoeffPpmPerC(tempCoeffCenti_) * (tempC_ - tempRefC_);
+  if (corr > CLK_TEMP_CORR_MAX_PPM) {
+    corr = CLK_TEMP_CORR_MAX_PPM;
+  }
+  if (corr < -CLK_TEMP_CORR_MAX_PPM) {
+    corr = -CLK_TEMP_CORR_MAX_PPM;
+  }
+  return corr;
+}
+
+float LocalClock::effectivePpm() const {
+  return freqPpm_ + tempCorrPpm();
+}
+
 bool LocalClock::extrapolate(uint64_t atUs, uint32_t& sec, uint32_t& frac) const {
   if (!haveAnchor_ || atUs < anchorEdgeUs_) {
     return false;
   }
-  const double scale = 1.0 - static_cast<double>(freqPpm_) * 1.0e-6;
+  const double scale = 1.0 - static_cast<double>(effectivePpm()) * 1.0e-6;
   const double elapsedUs = static_cast<double>(atUs - anchorEdgeUs_) * scale;
   if (elapsedUs < 0) {
     return false;
@@ -361,7 +404,7 @@ uint32_t LocalClock::qualityMs() const {
   }
   if (state_ == ClockState::Holdover) {
     // Free-run bound: max(|EMA|, crystal floor, PHI) × age, plus entry uncertainty.
-    const float ap = fabsf(freqPpm_);
+    const float ap = fabsf(effectivePpm());
     float usePpm = ap > CLK_HOLDOVER_PPM_FLOOR ? ap : CLK_HOLDOVER_PPM_FLOOR;
     if (usePpm < CLK_HOLDOVER_PHI_PPM) {
       usePpm = CLK_HOLDOVER_PHI_PPM;

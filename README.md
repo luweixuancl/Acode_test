@@ -73,6 +73,7 @@
 - **Timezone**：设置 UTC 偏移（默认 +8）
 - **Anomaly Mode**：GPS 异常策略 — Refuse（拒授时）/ Holdover 30s / Holdover 300s（写入 NVS）
 - **NTP ACL**：Off / AllowList（默认 Off；名单在网页 `/setup` 编辑）
+- **Temp Comp**：片上温度一阶 ppm 补偿（默认 Off；系数在 `/setup` 改）
 - **NTP Stats**：served / RATE / DENY / ACL / drop / clients
 - **Restart**：重启
 

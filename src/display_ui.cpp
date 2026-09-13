@@ -12,6 +12,7 @@ static const char* MENU_LABELS[] = {
     "Timezone",
     "Anomaly Mode",
     "NTP ACL",
+    "Temp Comp",
     "NTP Stats",
     "Restart",
 };
@@ -103,6 +104,9 @@ void DisplayUi::loop(EncoderInput& enc, GpsService& gps, WifiManager& wifi, NtpS
     case UiMode::SetAcl:
       handleAcl(rot, click, longPress);
       break;
+    case UiMode::SetTempComp:
+      handleTempComp(rot, click, longPress);
+      break;
     case UiMode::NtpStats:
       handleNtpStats(rot, click, longPress);
       break;
@@ -158,6 +162,9 @@ void DisplayUi::loop(EncoderInput& enc, GpsService& gps, WifiManager& wifi, NtpS
       break;
     case UiMode::SetAcl:
       drawAcl(settings);
+      break;
+    case UiMode::SetTempComp:
+      drawTempComp(settings);
       break;
     case UiMode::NtpStats:
       drawNtpStats(ntp);
@@ -401,6 +408,23 @@ void DisplayUi::drawAnomaly(const AppSettings& settings) {
   display_.println("long=back");
 }
 
+void DisplayUi::drawTempComp(const AppSettings& settings) {
+  (void)settings;
+  display_.setCursor(0, 0);
+  display_.println("Temp Comp");
+  display_.setCursor(0, 14);
+  display_.print(">");
+  display_.println(editTempComp_ ? "On" : "Off");
+  display_.setCursor(0, 28);
+  display_.print("k=");
+  display_.print(tempCoeffPpmPerC(settings.tempCoeffCenti), 2);
+  display_.println(" ppm/C");
+  display_.setCursor(0, 42);
+  display_.println("coeff via Web");
+  display_.setCursor(0, 54);
+  display_.println("rot=on/off save");
+}
+
 void DisplayUi::drawAcl(const AppSettings& settings) {
   (void)settings;
   display_.setCursor(0, 0);
@@ -537,6 +561,13 @@ void DisplayUi::handleMenu(int8_t rot, bool click, bool longPress) {
         settingsUnlock();
       }
       mode_ = UiMode::SetAcl;
+      break;
+    case MenuItem::TempComp:
+      if (settingsLock(pdMS_TO_TICKS(50))) {
+        editTempComp_ = gSettings.tempComp;
+        settingsUnlock();
+      }
+      mode_ = UiMode::SetTempComp;
       break;
     case MenuItem::NtpStats:
       mode_ = UiMode::NtpStats;
@@ -728,6 +759,30 @@ void DisplayUi::handleAcl(int8_t rot, bool click, bool longPress) {
       gStore.save(copy);
     }
     showMessage(String("ACL:") + ntpAclModeMenuLabel(editAclMode_));
+  }
+}
+
+void DisplayUi::handleTempComp(int8_t rot, bool click, bool longPress) {
+  if (longPress) {
+    mode_ = UiMode::Menu;
+    return;
+  }
+  if (rot != 0) {
+    editTempComp_ = !editTempComp_;
+  }
+  if (click) {
+    AppSettings copy;
+    bool locked = false;
+    if (settingsLock(pdMS_TO_TICKS(100))) {
+      gSettings.tempComp = editTempComp_;
+      copy = gSettings;
+      settingsUnlock();
+      locked = true;
+    }
+    if (locked) {
+      gStore.save(copy);
+    }
+    showMessage(editTempComp_ ? "Tcomp On" : "Tcomp Off");
   }
 }
 

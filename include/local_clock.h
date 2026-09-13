@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Arduino.h>
+#include <cmath>
 #include "config.h"
 #include "settings.h"
 
@@ -48,9 +49,16 @@ class LocalClock {
   bool referenceUtc(uint32_t& seconds, uint32_t& fraction) const;
   uint32_t qualityMs() const;
 
+  void setTempComp(bool enabled, int16_t coeffCenti);
+  void updateDieTemp(float tempC);
+
   ClockState state() const { return state_; }
   int32_t residualMs() const { return residualMs_; }
   float freqPpm() const { return freqPpm_; }
+  float effectivePpm() const;
+  float tempCorrPpm() const;
+  float dieTempC() const { return haveTemp_ ? tempC_ : NAN; }
+  bool tempCompEnabled() const { return tempComp_; }
   bool ppsStable() const { return ppsStable_; }
   uint32_t holdoverElapsedMs() const;
 
@@ -87,4 +95,11 @@ class LocalClock {
 
   uint64_t lastEdgeUs_ = 0;
   uint32_t lastPpsCount_ = 0;
+
+  bool tempComp_ = false;
+  int16_t tempCoeffCenti_ = CLK_TEMP_COEFF_CENTI;
+  bool haveTemp_ = false;
+  bool haveTempRef_ = false;
+  float tempC_ = 0.0f;
+  float tempRefC_ = 0.0f;
 };

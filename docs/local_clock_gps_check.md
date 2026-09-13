@@ -71,6 +71,7 @@ utc = utcSec0 + dt
 - NMEA 提交时用 `ppsCount` lag 对齐「最后边沿对应的整秒标签」，避免 -1 s 级假 residual
 - 冷启锚定要求 `ppsStable_`（连续好间隔），不在首个孤边沿上建锚
 - Holdover 年龄用 `esp_timer`（与秒尺同源），不用 `millis()`
+- **可选温度补偿**（NVS `tcmp` 默认关）：片上 TSENS 约 1 Hz；相对最近一次 PPS 估频时的温度做 `Δppm = k·ΔT`（默认 k=-0.50 ppm/°C，钳位 ±20 ppm）。关时行为与原先完全相同。
 
 ## 4. 交叉检核
 
@@ -93,6 +94,8 @@ residualMs = UTC(NMEA 秒 T 的边界) - LocalUtc(at PPS_edge_T)
 | `CLK_PPS_INTERVAL_MAX_ERR_US` | 5000 | PPS 间隔异常门限 |
 | `CLK_PPS_UNSTABLE_COUNT` | 3 | 连续间隔异常次数 |
 | `CLK_PPM_SPAN_SEC` | 8 | 估频平均间隔秒数（边沿环） |
+| `CLK_TEMP_COMP_DEFAULT` | 0 | 温度补偿默认关 |
+| `CLK_TEMP_COEFF_CENTI` | -50 | 默认 -0.50 ppm/°C |
 | `CLK_HOLDOVER_SHORT_SEC` | 30 | 短守时默认秒数 |
 | `CLK_HOLDOVER_LONG_SEC` | 300 | 长守时默认秒数 |
 | `CLK_HOLDOVER_PPM_FLOOR` | 50 | 守时色散晶振误差下限 (ppm) |

@@ -25,6 +25,9 @@ struct GpsStatus {
   ClockState clockState = ClockState::Acquiring;
   int32_t residualMs = 0;
   float freqPpm = 0;
+  float tempC = NAN;
+  float tempCorrPpm = 0;
+  bool tempComp = false;
   uint32_t holdoverMs = 0;
 };
 
@@ -33,6 +36,7 @@ class GpsService {
   void begin();
   // Call only from task-time.
   void loop(AnomalyPolicy policy, uint16_t holdoverSec);
+  void setTempComp(bool enabled, int16_t coeffCenti);
 
   GpsStatus snapshot() const;
 
@@ -49,6 +53,7 @@ class GpsService {
   void parseNmea();
   void commitNmeaTime(uint32_t epochSec, AnomalyPolicy policy, uint16_t holdoverSec);
   void publishStatus(const GpsStatus& work);
+  void sampleDieTemp();
 
   HardwareSerial gpsSerial_{GPS_UART_NUM};
   TinyGPSPlus gps_;
@@ -63,6 +68,8 @@ class GpsService {
   bool haveCommit_ = false;
   bool ppsSeen_ = false;
   uint32_t lastDrainedPpsCount_ = 0;
+  bool tempSensorOk_ = false;
+  uint32_t lastTempMs_ = 0;
 
   mutable portMUX_TYPE mux_ = portMUX_INITIALIZER_UNLOCKED;
 
