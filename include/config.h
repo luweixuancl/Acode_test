@@ -44,6 +44,8 @@
 #define DISPLAY_REFRESH_MS   250
 #define WIFI_CONNECT_TIMEOUT_MS 20000
 #define WIFI_NO_AP_REBEGIN_MS    3000  // re-WiFi.begin while Connecting after reason 201
+// Ignore local ASSOC_LEAVE (8) etc. right after our own disconnect()+begin().
+#define WIFI_DISC_GRACE_MS       2500
 #define WIFI_SCAN_TIMEOUT_MS    15000  // async scan must not hang reconnect give-up
 #define IP_CONFLICT_TIMEOUT_MS   800
 // Auto-reconnect backoff (ms): attempt 1 immediate, then 2s/5s/10s/30s...

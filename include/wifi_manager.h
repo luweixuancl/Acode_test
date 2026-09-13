@@ -85,6 +85,8 @@ class WifiManager {
   bool consumeDisconnect(uint16_t* reasonOut = nullptr);
   // True once after auto-reconnect gives up (max attempts / window).
   bool consumeReconnectGiveUp();
+  // If radio already has STA+IP but FSM missed GOT_IP, promote to Connected.
+  bool healIfStaUp();
 
  private:
   static void onWifiEvent(WiFiEvent_t event, WiFiEventInfo_t info);
@@ -102,6 +104,7 @@ class WifiManager {
   WifiConnectState connectState_ = WifiConnectState::Idle;
   uint32_t connectDeadlineMs_ = 0;
   uint32_t lastBeginMs_ = 0;
+  uint32_t discGraceUntilMs_ = 0;
   bool expectLink_ = false;
 
   WifiScanState scanState_ = WifiScanState::Idle;

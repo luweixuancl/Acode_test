@@ -58,13 +58,13 @@ Connected --DISC--> armed
 | reason | 含义（常见） |
 |--------|----------------|
 | 2 | `AUTH_EXPIRE` |
-| 3 | `AUTH_LEAVE` |
+| 3 | `AUTH_LEAVE`（本地离开，begin 前 disconnect 常见） |
 | 4 | `ASSOC_EXPIRE` |
-| 8 | `ASSOC_LEAVE` / 主动断开 |
+| 8 | `ASSOC_LEAVE`（本地 leave；**勿当失败**——常与 `disconnect()+begin` 竞态） |
 | 15 | `4WAY_HANDSHAKE_TIMEOUT`（密码错误常见） |
 | 200+ | 无 AP / 信号丢失等（依 IDF 版本） |
 
-串口日志前缀：`[wifi-evt]` / `[wifi]`。
+连接中对 reason 2/3/8 保持等待 GOT_IP；`healIfStaUp` 在 FSM 误判 Failed 但射频已拿到 IP 时收复链路，避免下一轮 reconnect 把好连接踢掉后进 SoftAP。
 
 ## SoftAP 逃生
 

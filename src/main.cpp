@@ -185,6 +185,17 @@ static void handleNetRequest(const NetRequest& req) {
 }
 
 static void pollDisconnectAndReconnect() {
+  // Radio may already have IP while FSM still thinks Failed (reason=8 race).
+  if (gNetWork == NetWork::Idle && gWifi.healIfStaUp()) {
+    char buf[48];
+    snprintf(buf, sizeof(buf), "OK %s", gWifi.localIp().toString().c_str());
+    postUiText(buf);
+    gWifi.stopAp();
+    gIpc.setupAp = false;
+    gBootNeedApIfFail = false;
+    Serial.printf("STA IP (healed): %s\n", gWifi.localIp().toString().c_str());
+  }
+
   // Connecting owns DISC via pollConnect; elsewhere consume link-loss edges.
   if (gNetWork != NetWork::Connecting) {
     uint16_t discReason = 0;
@@ -196,7 +207,11 @@ static void pollDisconnectAndReconnect() {
   }
 
   if (gWifi.consumeReconnectGiveUp()) {
-    if (gBootNeedApIfFail || !gIpc.setupAp) {
+    if (gWifi.isStaConnected()) {
+      // Give-up raced with a live link — keep STA, do not SoftAP.
+      gWifi.healIfStaUp();
+      gBootNeedApIfFail = false;
+    } else if (gBootNeedApIfFail || !gIpc.setupAp) {
       openSetupApIfNeeded("AP setup mode");
       gBootNeedApIfFail = false;
     }

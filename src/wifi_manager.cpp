@@ -138,6 +138,9 @@ bool WifiManager::beginConnect(const AppSettings& settings) {
     WiFi.mode(WIFI_STA);
     delay(50);
   }
+  // disconnect() posts ASSOC_LEAVE (8) asynchronously — drop it so pollConnect
+  // does not treat our own leave as a failed join.
+  takeEventBit(WifiEvtBits::Disc);
   WiFi.setSleep(false);
 #if defined(WIFI_ALL_CHANNEL_SCAN)
   WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
@@ -155,6 +158,7 @@ bool WifiManager::beginConnect(const AppSettings& settings) {
   WiFi.begin(settings.wifiSsid.c_str(), settings.wifiPass.c_str());
   connectDeadlineMs_ = millis() + WIFI_CONNECT_TIMEOUT_MS;
   lastBeginMs_ = millis();
+  discGraceUntilMs_ = millis() + WIFI_DISC_GRACE_MS;
   connectState_ = WifiConnectState::Connecting;
   expectLink_ = true;
   return true;
@@ -173,9 +177,30 @@ WifiConnectState WifiManager::pollConnect() {
     return connectState_;
   }
 
+  // Fallback: associated + has IP (covers static IP if GOT_IP was missed).
+  if (WiFi.status() == WL_CONNECTED && static_cast<uint32_t>(WiFi.localIP()) != 0) {
+    takeEventBit(WifiEvtBits::Disc);  // stale leave from before association
+    connectState_ = WifiConnectState::Connected;
+    cancelAutoReconnect();
+    Serial.println();
+    Serial.printf("STA connected (poll): %s\n", WiFi.localIP().toString().c_str());
+    return connectState_;
+  }
+
   if (takeEventBit(WifiEvtBits::Disc)) {
+    // Local ASSOC_LEAVE (8) / AUTH_LEAVE (3) often = our disconnect()+begin race.
+    // Do not abort — keep waiting for GOT_IP until timeout.
+    const bool localLeave = (lastDiscReason_ == 8 || lastDiscReason_ == 3 || lastDiscReason_ == 2);
+    if (localLeave && static_cast<int32_t>(millis() - discGraceUntilMs_) < 0) {
+      Serial.printf("[wifi] ignore disc reason=%u (begin grace)\n", lastDiscReason_);
+      return WifiConnectState::Connecting;
+    }
+    if (localLeave) {
+      Serial.printf("[wifi] disc reason=%u while joining — keep waiting\n", lastDiscReason_);
+      return WifiConnectState::Connecting;
+    }
+
     // Cold boot often gets NO_AP_FOUND (201) before the first full scan finishes.
-    // Keep trying until the connect deadline instead of aborting into SoftAP.
     if (lastDiscReason_ == 201 || lastDiscReason_ == 200) {
       if (static_cast<int32_t>(millis() - connectDeadlineMs_) >= 0) {
         connectState_ = WifiConnectState::Failed;
@@ -188,8 +213,10 @@ WifiConnectState WifiManager::pollConnect() {
         Serial.printf("\n[wifi] no AP yet (reason=%u) — re-begin\n", lastDiscReason_);
         WiFi.disconnect(false);
         delay(20);
+        takeEventBit(WifiEvtBits::Disc);
         WiFi.begin(reconnectSettings_.wifiSsid.c_str(), reconnectSettings_.wifiPass.c_str());
         lastBeginMs_ = millis();
+        discGraceUntilMs_ = millis() + WIFI_DISC_GRACE_MS;
       }
       return WifiConnectState::Connecting;
     }
@@ -201,15 +228,6 @@ WifiConnectState WifiManager::pollConnect() {
     return connectState_;
   }
 
-  // Fallback: associated + has IP (covers static IP if GOT_IP was missed).
-  if (WiFi.status() == WL_CONNECTED && static_cast<uint32_t>(WiFi.localIP()) != 0) {
-    connectState_ = WifiConnectState::Connected;
-    cancelAutoReconnect();
-    Serial.println();
-    Serial.printf("STA connected (poll): %s\n", WiFi.localIP().toString().c_str());
-    return connectState_;
-  }
-
   if (static_cast<int32_t>(millis() - connectDeadlineMs_) >= 0) {
     connectState_ = WifiConnectState::Failed;
     expectLink_ = false;
@@ -218,18 +236,40 @@ WifiConnectState WifiManager::pollConnect() {
     return connectState_;
   }
 
-  // Periodic re-begin even if Disc bit was coalesced.
+  // Re-begin only when clearly idle / no AP — never kick a live association.
+  const wl_status_t st = WiFi.status();
   if (!reconnectSettings_.wifiSsid.isEmpty() &&
       static_cast<int32_t>(millis() - lastBeginMs_) >= static_cast<int32_t>(WIFI_NO_AP_REBEGIN_MS) &&
-      WiFi.status() != WL_CONNECTED) {
+      st != WL_CONNECTED &&
+      (st == WL_NO_SSID_AVAIL || st == WL_CONNECT_FAILED || lastDiscReason_ == 200 ||
+       lastDiscReason_ == 201)) {
     Serial.println("\n[wifi] still joining — re-begin");
     WiFi.disconnect(false);
     delay(20);
+    takeEventBit(WifiEvtBits::Disc);
     WiFi.begin(reconnectSettings_.wifiSsid.c_str(), reconnectSettings_.wifiPass.c_str());
     lastBeginMs_ = millis();
+    discGraceUntilMs_ = millis() + WIFI_DISC_GRACE_MS;
   }
 
   return WifiConnectState::Connecting;
+}
+
+bool WifiManager::healIfStaUp() {
+  if (!isStaConnected()) {
+    return false;
+  }
+  if (connectState_ == WifiConnectState::Connected) {
+    return false;
+  }
+  // Missed GOT_IP after a false Failed (e.g. reason=8 race) — adopt live link.
+  takeEventBit(WifiEvtBits::GotIp);
+  takeEventBit(WifiEvtBits::Disc);
+  connectState_ = WifiConnectState::Connected;
+  cancelAutoReconnect();
+  expectLink_ = true;
+  Serial.printf("[wifi] heal → Connected %s\n", WiFi.localIP().toString().c_str());
+  return true;
 }
 
 bool WifiManager::consumeDisconnect(uint16_t* reasonOut) {
@@ -263,6 +303,11 @@ bool WifiManager::consumeDisconnect(uint16_t* reasonOut) {
 
 bool WifiManager::pollAutoReconnect(AppSettings* outSettings) {
   if (!autoReconnect_ || !reconnectArmed_) {
+    return false;
+  }
+  // Already online — never disconnect a good STA to "retry".
+  if (isStaConnected()) {
+    healIfStaUp();
     return false;
   }
   if (isBusy()) {
