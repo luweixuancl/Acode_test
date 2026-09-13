@@ -236,13 +236,19 @@ void WebPortal::handleSetup() {
     haveSaved = !savedSsid.isEmpty();
     settingsUnlock();
   }
+  const String defPass = derivedSoftApPassword();
   String body;
-  body.reserve(5600);
+  body.reserve(6200);
   body += F("<h1>NTP 设置</h1><p><a href='/'>返回状态</a></p>");
   body += F("<div class='card'><h2 style='font-size:1rem;margin:0 0 8px'>管理口令</h2>"
-            "<p style='color:#64748b;font-size:.85rem'>写操作需要口令（默认 SoftAP："
-            "<code>NTP-</code>+MAC 后 4 位）。可在下方覆盖 SoftAP / Web 口令。</p>"
-            "<label>Auth</label><input id='auth' type='password' autocomplete='current-password'>"
+            "<p style='color:#64748b;font-size:.85rem'>改 WiFi / 策略 / ACL 必须填写下方口令。"
+            "默认与 SoftAP 相同：</p><p><code>");
+  body += defPass;
+  body += F("</code></p>"
+            "<label>Auth（写操作口令）</label>"
+            "<input id='auth' type='password' autocomplete='current-password' placeholder='");
+  body += defPass;
+  body += F("'>"
             "<label>SoftAP 口令覆盖（可选，≥8）</label>"
             "<input id='appw' type='password' placeholder='留空=默认 NTP-XXXX'>"
             "<label>Web 写口令覆盖（可选）</label>"
@@ -254,7 +260,7 @@ void WebPortal::handleSetup() {
     body += F("</b></p>"
               "<p style='color:#64748b;font-size:.85rem'>固件更新后会自动重连；无需重新输入 WiFi 密码。"
               "仅当路由器改密或换热点时才需要下方重新配网。</p>"
-              "<button onclick='reconnectSaved()'>使用已保存网络重连</button>"
+              "<button type='button' onclick='reconnectSaved()'>使用已保存网络重连</button>"
               "<p id='rmsg'></p></div>");
   }
   body += F("<div class='card'><h2 style='font-size:1rem;margin:0 0 8px'>GPS 异常策略</h2>"
@@ -263,7 +269,7 @@ void WebPortal::handleSetup() {
             "<option value='1'>短时守时 Holdover 30s</option>"
             "<option value='2'>长时守时 Holdover 5min</option>"
             "</select>"
-            "<button onclick='savePolicy()'>保存策略</button>"
+            "<button type='button' onclick='savePolicy()'>保存策略</button>"
             "<p id='pmsg'></p></div>");
   body += F("<div class='card'><h2 style='font-size:1rem;margin:0 0 8px'>NTP ACL 白名单</h2>"
             "<p style='color:#64748b;font-size:.85rem'>默认 Off。开启 AllowList 后仅列出的 IPv4 可取时"
@@ -274,7 +280,7 @@ void WebPortal::handleSetup() {
             "</select>"
             "<label>允许的 IP（每行一个）</label>"
             "<textarea id='acllist' rows='5' style='width:100%;font-family:monospace'></textarea>"
-            "<button onclick='saveAcl()'>保存 ACL</button>"
+            "<button type='button' onclick='saveAcl()'>保存 ACL</button>"
             "<p id='amsg'></p></div>");
   body += F("<div class='card'><h2 style='font-size:1rem;margin:0 0 8px'>晶振温度补偿</h2>"
             "<p style='color:#64748b;font-size:.85rem'>默认关。用片上温度对 Holdover 外推做一阶 "
@@ -285,14 +291,14 @@ void WebPortal::handleSetup() {
             "</select>"
             "<label>系数 ppm/°C</label>"
             "<input id='tcpc' type='number' step='0.01'>"
-            "<button onclick='saveTemp()'>保存温度补偿</button>"
+            "<button type='button' onclick='saveTemp()'>保存温度补偿</button>"
             "<p id='tmsg'></p></div>");
   body += F("<div class='card'><h2 style='font-size:1rem;margin:0 0 8px'>WiFi 配网</h2>"
             "<p>扫描热点，选择 SSID，输入密码后连接。</p>"
-            "<button onclick='scan()'>扫描 WiFi</button>"
+            "<button type='button' onclick='scan()'>扫描 WiFi</button>"
             "<label>SSID</label><select id='ssid'></select>"
             "<label>Password</label><input id='pass' type='password'>"
-            "<button onclick='saveWifi()'>连接</button>"
+            "<button type='button' onclick='saveWifi()'>连接</button>"
             "<p id='msg'></p></div>");
   body += F("<script>"
             "function authBody(extra){"
@@ -302,6 +308,7 @@ void WebPortal::handleSetup() {
             " if(ap)o.apPassword=ap;if(wp)o.webPassword=wp;return o;}"
             "async function sleep(ms){return new Promise(r=>setTimeout(r,ms));}"
             "async function scan(){"
+            " try{"
             " document.getElementById('msg').textContent='Scanning...';"
             " let j=null;"
             " for(let i=0;i<50;i++){"
@@ -315,39 +322,50 @@ void WebPortal::handleSetup() {
             " j.forEach(n=>{const o=document.createElement('option');"
             " o.value=n.ssid; o.textContent=n.ssid+' ('+n.rssi+'dBm)'; s.appendChild(o);});"
             " document.getElementById('msg').textContent='Found '+j.length+' networks';"
+            " }catch(e){document.getElementById('msg').textContent=String(e);}"
             "}"
             "async function saveWifi(){"
+            " try{"
             " const ssid=document.getElementById('ssid').value;"
             " const pass=document.getElementById('pass').value;"
             " const body=JSON.stringify(authBody({ssid,pass}));"
             " const r=await fetch('/save',{method:'POST',headers:{'Content-Type':'application/json'},body});"
             " document.getElementById('msg').textContent=await r.text();"
+            " }catch(e){document.getElementById('msg').textContent=String(e);}"
             "}"
             "async function reconnectSaved(){"
-            " const r=await fetch('/save',{method:'POST',headers:{'Content-Type':'application/json'},"
-            "  body:JSON.stringify(authBody({reconnectSaved:true})});"
-            " document.getElementById('rmsg').textContent=await r.text();"
+            " try{"
+            "  const r=await fetch('/save',{method:'POST',headers:{'Content-Type':'application/json'},"
+            "   body:JSON.stringify(authBody({reconnectSaved:true}))});"
+            "  document.getElementById('rmsg').textContent=await r.text();"
+            " }catch(e){document.getElementById('rmsg').textContent=String(e);}"
             "}"
             "async function savePolicy(){"
+            " try{"
             " const anomalyPolicy=parseInt(document.getElementById('apol').value,10);"
             " const body=JSON.stringify(authBody({anomalyPolicy}));"
             " const r=await fetch('/save',{method:'POST',headers:{'Content-Type':'application/json'},body});"
             " document.getElementById('pmsg').textContent=await r.text();"
+            " }catch(e){document.getElementById('pmsg').textContent=String(e);}"
             "}"
             "async function saveAcl(){"
+            " try{"
             " const ntpAclMode=parseInt(document.getElementById('aclm').value,10);"
             " const ntpAcl=document.getElementById('acllist').value.split(/\\r?\\n/)"
             "  .map(s=>s.trim()).filter(s=>s.length>0);"
             " const body=JSON.stringify(authBody({ntpAclMode,ntpAcl}));"
             " const r=await fetch('/save',{method:'POST',headers:{'Content-Type':'application/json'},body});"
             " document.getElementById('amsg').textContent=await r.text();"
+            " }catch(e){document.getElementById('amsg').textContent=String(e);}"
             "}"
             "async function saveTemp(){"
+            " try{"
             " const tempComp=parseInt(document.getElementById('tcmp').value,10)===1;"
             " const tempCoeff=parseFloat(document.getElementById('tcpc').value);"
             " const body=JSON.stringify(authBody({tempComp,tempCoeff}));"
             " const r=await fetch('/save',{method:'POST',headers:{'Content-Type':'application/json'},body});"
             " document.getElementById('tmsg').textContent=await r.text();"
+            " }catch(e){document.getElementById('tmsg').textContent=String(e);}"
             "}"
             "document.getElementById('apol').value='");
   body += String(apol);
