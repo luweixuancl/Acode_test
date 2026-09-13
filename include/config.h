@@ -92,6 +92,8 @@
 #define CLK_HOLDOVER_LONG_SEC       300
 #define CLK_PPS_EDGE_RING            16
 #define CLK_PPM_EMA_ALPHA          0.2f
+// Average this many 1s PPS intervals before EMA (needs span+1 edges).
+#define CLK_PPM_SPAN_SEC              8
 // Below this residual while Locked, keep PPS-only advance (no NMEA re-anchor).
 #define CLK_LOCKED_SLEW_MS            5
 // ISR→task PPS queue (missed edges under WiFi load).

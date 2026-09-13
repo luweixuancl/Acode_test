@@ -14,7 +14,7 @@ void LocalClock::reset() {
   state_ = ClockState::Acquiring;
   residualMs_ = 0;
   okStreak_ = 0;
-  holdoverStartMs_ = 0;
+  holdoverStartUs_ = 0;
   lastEdgeUs_ = 0;
   lastPpsCount_ = 0;
 }
@@ -25,6 +25,33 @@ void LocalClock::pushEdge(uint64_t edgeUs) {
   if (edgeCount_ < kRing) {
     edgeCount_++;
   }
+}
+
+void LocalClock::updatePpmFromRing() {
+  if (edgeCount_ < 2) {
+    return;
+  }
+  uint8_t span = static_cast<uint8_t>(edgeCount_ - 1);
+  if (span > CLK_PPM_SPAN_SEC) {
+    span = CLK_PPM_SPAN_SEC;
+  }
+  const uint8_t newestIdx = static_cast<uint8_t>((edgeHead_ + kRing - 1) % kRing);
+  const uint8_t oldestIdx = static_cast<uint8_t>((newestIdx + kRing - span) % kRing);
+  const uint64_t newest = edges_[newestIdx];
+  const uint64_t oldest = edges_[oldestIdx];
+  if (newest <= oldest) {
+    return;
+  }
+  const int64_t elapsed = static_cast<int64_t>(newest - oldest);
+  const int64_t expected = static_cast<int64_t>(span) * 1000000LL;
+  const int64_t err = elapsed - expected;
+  const int64_t gate = static_cast<int64_t>(CLK_PPS_INTERVAL_MAX_ERR_US) * static_cast<int64_t>(span);
+  if (llabs(err) > gate) {
+    return;
+  }
+  // err (µs) over span seconds → ppm.
+  const float samplePpm = static_cast<float>(err) / static_cast<float>(span);
+  freqPpm_ = freqPpm_ * (1.0f - CLK_PPM_EMA_ALPHA) + samplePpm * CLK_PPM_EMA_ALPHA;
 }
 
 void LocalClock::onPpsEdge(uint64_t edgeUs, uint32_t ppsCount) {
@@ -45,8 +72,6 @@ void LocalClock::onPpsEdge(uint64_t edgeUs, uint32_t ppsCount) {
         }
       } else {
         ppsBadStreak_ = 0;
-        const float samplePpm = static_cast<float>(err) / 1000000.0f * 1.0e6f;
-        freqPpm_ = freqPpm_ * (1.0f - CLK_PPM_EMA_ALPHA) + samplePpm * CLK_PPM_EMA_ALPHA;
       }
     }
   } else if (delta > 1) {
@@ -59,6 +84,9 @@ void LocalClock::onPpsEdge(uint64_t edgeUs, uint32_t ppsCount) {
   pushEdge(edgeUs);
   lastEdgeUs_ = edgeUs;
   lastPpsCount_ = ppsCount;
+  if (delta == 1 && ppsBadStreak_ == 0) {
+    updatePpmFromRing();
+  }
   ppsStable_ = (ppsBadStreak_ < CLK_PPS_UNSTABLE_COUNT) && (edgeCount_ >= 2);
 
   // Once disciplined, walk UTC with PPS. Catch up by delta if edges were coalesced.
@@ -114,7 +142,7 @@ bool LocalClock::extrapolate(uint64_t atUs, uint32_t& sec, uint32_t& frac) const
 
 void LocalClock::enterHoldover() {
   if (state_ != ClockState::Holdover) {
-    holdoverStartMs_ = millis();
+    holdoverStartUs_ = esp_timer_get_time();
   }
   state_ = ClockState::Holdover;
   okStreak_ = 0;
@@ -123,7 +151,7 @@ void LocalClock::enterHoldover() {
 void LocalClock::enterUnsynced() {
   state_ = ClockState::Unsynced;
   okStreak_ = 0;
-  holdoverStartMs_ = 0;
+  holdoverStartUs_ = 0;
   haveAnchor_ = false;
   ppsStable_ = false;
   ppsBadStreak_ = 0;
@@ -159,9 +187,9 @@ void LocalClock::onNmeaCommit(uint32_t epochSec, uint32_t ppsCountAtCommit, Anom
   const uint32_t utcAtLastEdge =
       epochSec + (lag > 0 ? static_cast<uint32_t>(lag) : 0);
 
-  // Bootstrap anchor on first good PPS + NMEA.
+  // Bootstrap only after PPS interval looks stable (not the first lone edge).
   if (!haveAnchor_) {
-    if (ppsStable_ || edgeCount_ >= 1) {
+    if (ppsStable_) {
       setAnchor(utcAtLastEdge, lastEdgeUs_, ppsCountAtCommit);
       residualMs_ = 0;
       state_ = ClockState::Acquiring;
@@ -203,7 +231,7 @@ void LocalClock::onNmeaCommit(uint32_t epochSec, uint32_t ppsCountAtCommit, Anom
 
     if (okStreak_ >= CLK_RELOCK_COUNT && ppsStable_) {
       state_ = ClockState::Locked;
-      holdoverStartMs_ = 0;
+      holdoverStartUs_ = 0;
     } else if (state_ == ClockState::Unsynced || state_ == ClockState::Acquiring) {
       state_ = ClockState::Acquiring;
     }
@@ -290,10 +318,14 @@ void LocalClock::tick(bool nmeaFresh, bool ppsFresh, AnomalyPolicy policy, uint1
 }
 
 uint32_t LocalClock::holdoverElapsedMs() const {
-  if (state_ != ClockState::Holdover || holdoverStartMs_ == 0) {
+  if (state_ != ClockState::Holdover || holdoverStartUs_ == 0) {
     return 0;
   }
-  return millis() - holdoverStartMs_;
+  const uint64_t now = esp_timer_get_time();
+  if (now < holdoverStartUs_) {
+    return 0;
+  }
+  return static_cast<uint32_t>((now - holdoverStartUs_) / 1000ULL);
 }
 
 bool LocalClock::nowUtc(uint32_t& seconds, uint32_t& fraction) const {

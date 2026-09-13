@@ -51,7 +51,7 @@ flowchart TB
 |----|------|
 | 时间源 | ISR 记录 `esp_timer_get_time()`（µs，64-bit）。`millis()` 分辨率不足以估斜率 |
 | 缓冲 | 最近 8～16 个 PPS 边沿 |
-| 估计 | 间隔 vs \(10^6\) µs → `freqErrorPpm`（EMA 平滑） |
+| 估计 | 边沿环最近 `CLK_PPM_SPAN_SEC`（默认 8）个 1s 间隔的平均误差 → `freqPpm`（再 EMA） |
 | 相位锚 | 信任后的 `(utcSec0, edgeUs0)` |
 | 异常 | \|间隔 − 1s\| > 5 ms 连续 3 次 → `PpsUnstable` |
 
@@ -69,6 +69,8 @@ utc = utcSec0 + dt
 - **Locked / Degraded / Holdover**：每个 PPS 边沿将锚点 `utcSec` +1（相位跟 PPS 走）
 - **NMEA**：交叉检核；Acquiring 时允许重锚；Locked 下仅当 \|residual\| ≥ `CLK_LOCKED_SLEW_MS` 才轻量纠相，避免秒级 NMEA 抖动抬高 std
 - NMEA 提交时用 `ppsCount` lag 对齐「最后边沿对应的整秒标签」，避免 -1 s 级假 residual
+- 冷启锚定要求 `ppsStable_`（连续好间隔），不在首个孤边沿上建锚
+- Holdover 年龄用 `esp_timer`（与秒尺同源），不用 `millis()`
 
 ## 4. 交叉检核
 
@@ -90,6 +92,7 @@ residualMs = UTC(NMEA 秒 T 的边界) - LocalUtc(at PPS_edge_T)
 | `CLK_RELOCK_COUNT` | 3 | 连续通过次数 |
 | `CLK_PPS_INTERVAL_MAX_ERR_US` | 5000 | PPS 间隔异常门限 |
 | `CLK_PPS_UNSTABLE_COUNT` | 3 | 连续间隔异常次数 |
+| `CLK_PPM_SPAN_SEC` | 8 | 估频平均间隔秒数（边沿环） |
 | `CLK_HOLDOVER_SHORT_SEC` | 30 | 短守时默认秒数 |
 | `CLK_HOLDOVER_LONG_SEC` | 300 | 长守时默认秒数 |
 | `CLK_HOLDOVER_PPM_FLOOR` | 50 | 守时色散晶振误差下限 (ppm) |

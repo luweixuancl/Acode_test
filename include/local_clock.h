@@ -61,6 +61,7 @@ class LocalClock {
   void enterUnsynced();
   void applyFail(AnomalyPolicy policy);
   void pushEdge(uint64_t edgeUs);
+  void updatePpmFromRing();
 
   static constexpr size_t kRing = CLK_PPS_EDGE_RING;
 
@@ -82,7 +83,7 @@ class LocalClock {
 
   AnomalyPolicy policy_ = AnomalyPolicy::Refuse;
   uint16_t holdoverSec_ = CLK_HOLDOVER_SHORT_SEC;
-  uint32_t holdoverStartMs_ = 0;
+  uint64_t holdoverStartUs_ = 0;
 
   uint64_t lastEdgeUs_ = 0;
   uint32_t lastPpsCount_ = 0;
