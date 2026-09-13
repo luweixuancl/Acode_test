@@ -38,6 +38,7 @@ class GpsService {
 
   bool ppsFresh() const;
   bool nowUtc(uint32_t& seconds, uint32_t& fraction) const;
+  bool referenceUtc(uint32_t& seconds, uint32_t& fraction) const;
   uint32_t qualityMs() const;
   const LocalClock& localClock() const { return localClock_; }
 

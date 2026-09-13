@@ -203,3 +203,7 @@ bool GpsService::nowUtc(uint32_t& seconds, uint32_t& fraction) const {
   // NTP honesty: only LocalClock Locked/Degraded/Holdover may serve time.
   return localClock_.nowUtc(seconds, fraction);
 }
+
+bool GpsService::referenceUtc(uint32_t& seconds, uint32_t& fraction) const {
+  return localClock_.referenceUtc(seconds, fraction);
+}

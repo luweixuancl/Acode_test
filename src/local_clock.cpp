@@ -257,7 +257,8 @@ void LocalClock::tick(bool nmeaFresh, bool ppsFresh, AnomalyPolicy policy, uint1
       }
     }
     if (state_ == ClockState::Holdover) {
-      if (holdoverElapsedMs() >= static_cast<uint32_t>(holdoverSec_) * 1000UL) {
+      if (holdoverElapsedMs() >= static_cast<uint32_t>(holdoverSec_) * 1000UL ||
+          qualityMs() >= CLK_HOLDOVER_MAX_QUALITY_MS) {
         enterUnsynced();
       }
     }
@@ -277,7 +278,8 @@ void LocalClock::tick(bool nmeaFresh, bool ppsFresh, AnomalyPolicy policy, uint1
   }
 
   if (state_ == ClockState::Holdover) {
-    if (holdoverElapsedMs() >= static_cast<uint32_t>(holdoverSec_) * 1000UL) {
+    if (holdoverElapsedMs() >= static_cast<uint32_t>(holdoverSec_) * 1000UL ||
+        qualityMs() >= CLK_HOLDOVER_MAX_QUALITY_MS) {
       enterUnsynced();
     }
   }
@@ -302,6 +304,17 @@ bool LocalClock::nowUtc(uint32_t& seconds, uint32_t& fraction) const {
   return extrapolate(esp_timer_get_time(), seconds, fraction);
 }
 
+bool LocalClock::referenceUtc(uint32_t& seconds, uint32_t& fraction) const {
+  if (!haveAnchor_ || (state_ != ClockState::Locked && state_ != ClockState::Degraded &&
+                       state_ != ClockState::Holdover)) {
+    return false;
+  }
+  // Anchor is the last PPS-disciplined whole second (phase at edge).
+  seconds = anchorUtcSec_;
+  fraction = 0;
+  return true;
+}
+
 uint32_t LocalClock::qualityMs() const {
   if (state_ == ClockState::Acquiring || state_ == ClockState::Unsynced || !haveAnchor_) {
     return 0xFFFFFFFF;
@@ -315,13 +328,16 @@ uint32_t LocalClock::qualityMs() const {
     q = q < 50 ? 50 : q;
   }
   if (state_ == ClockState::Holdover) {
-    // Honest free-run bound: max(|EMA ppm|, floor) × holdover age → ms.
+    // Free-run bound: max(|EMA|, crystal floor, PHI) × age, plus entry uncertainty.
     const float ap = fabsf(freqPpm_);
-    const float usePpm = ap > CLK_HOLDOVER_PPM_FLOOR ? ap : CLK_HOLDOVER_PPM_FLOOR;
+    float usePpm = ap > CLK_HOLDOVER_PPM_FLOOR ? ap : CLK_HOLDOVER_PPM_FLOOR;
+    if (usePpm < CLK_HOLDOVER_PHI_PPM) {
+      usePpm = CLK_HOLDOVER_PHI_PPM;
+    }
     const float elapsedSec = static_cast<float>(holdoverElapsedMs()) / 1000.0f;
     // error_s = ppm * 1e-6 * t_s  →  error_ms = ppm * t_s / 1000
     const uint32_t growMs = static_cast<uint32_t>(usePpm * elapsedSec / 1000.0f);
-    q = q + 50 + growMs;
+    q = q + CLK_HOLDOVER_ENTRY_MS + growMs;
   }
   const float ap = fabsf(freqPpm_);
   if (ap > 1.0f) {

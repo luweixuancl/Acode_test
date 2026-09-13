@@ -92,6 +92,10 @@ residualMs = UTC(NMEA 秒 T 的边界) - LocalUtc(at PPS_edge_T)
 | `CLK_PPS_UNSTABLE_COUNT` | 3 | 连续间隔异常次数 |
 | `CLK_HOLDOVER_SHORT_SEC` | 30 | 短守时默认秒数 |
 | `CLK_HOLDOVER_LONG_SEC` | 300 | 长守时默认秒数 |
+| `CLK_HOLDOVER_PPM_FLOOR` | 50 | 守时色散晶振误差下限 (ppm) |
+| `CLK_HOLDOVER_PHI_PPM` | 15 | NTP PHI 下限 (ppm)，色散增速不低于此值 |
+| `CLK_HOLDOVER_ENTRY_MS` | 100 | 进入守时额外不确定性 (ms) |
+| `CLK_HOLDOVER_MAX_QUALITY_MS` | 500 | 守时质量超此值提前 Unsynced |
 
 ## 5. 状态机
 
@@ -106,17 +110,19 @@ stateDiagram-v2
   Degraded --> Unsynced: FAIL且Refuse
   Degraded --> Holdover: FAIL且Holdover策略
   Holdover --> Locked: NMEA回来且一致
-  Holdover --> Unsynced: holdover超时或PPS不稳
+  Holdover --> Unsynced: 超时或质量超阈或PPS不稳
   Unsynced --> Acquiring: 数据流恢复
 ```
 
 | 状态 | NTP 行为 | OLED / Web |
 |------|----------|------------|
 | Acquiring | LI=3，stratum 16，RefID `INIT` | D5 闪；`timeValid=false` |
-| Locked | LI=0，stratum 1，dispersion 小，RefID `GPSS` | D5 常亮 |
+| Locked | LI=0，stratum 1，dispersion 小，RefID `GPSS`；Reference=末次 PPS 整秒 | D5 心跳 |
 | Degraded | LI=0，stratum 1，dispersion ≥ \|residual\|，RefID `GPSS` | 网页 warn |
-| Holdover | LI=1，stratum 1，dispersion 随时间增大，RefID `GPSS` | 标明 holdover |
+| Holdover | LI=0，stratum 1，dispersion 随时间增大（entry+ppm×age），RefID `GPSS`；质量超阈或超时 → Unsynced | 标明 holdover（`clock.state=HLD`） |
 | Unsynced | LI=3，stratum 16，RefID `INIT` | D5 闪/灭 |
+
+> **LI 语义**：RFC 的 LI 仅表示闰秒告警，**不用 LI=1 表示 Holdover**。守时状态靠 dispersion 与管理面（OLED/`/status`）表达。
 
 **WARN（三种策略相同）**：仍可 stratum 1，但 dispersion 必须反映 residual。
 

@@ -97,7 +97,7 @@ ntpdate -q <设备IP>
 chronyc sources
 ```
 
-GPS 锁定且 PPS 正常时，应答为 **stratum 1**，Reference ID 为 `GPSS`。未同步时 LI=3 / stratum 16 / RefID `INIT`；Holdover 时 LI=1。
+GPS 锁定且 PPS 正常时，应答为 **stratum 1**，Reference ID 为 `GPSS`。未同步时 LI=3 / stratum 16 / RefID `INIT`；Holdover 时仍 **LI=0**（闰秒告警位不复用），靠抬高 root dispersion 与 `/status` 的 `clock.state=HLD` 标明守时。
 
 Windows 下若工程路径含非 ASCII 字符导致链接失败，可用 ASCII junction（如 `C:\acode_leds`）再 `pio run`。
 

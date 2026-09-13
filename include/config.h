@@ -85,7 +85,14 @@
 // Missed PPS seconds ≥ this → Unsynced (not silent catch-up only).
 #define CLK_PPS_MISS_UNSYNC           3
 // Holdover dispersion: floor crystal error (ppm) when EMA is still small.
-#define CLK_HOLDOVER_PPM_FLOOR       20.0f
+// Cheap MCU XO + unknown temp: 50 ppm is more honest than 20 for free-run bound.
+#define CLK_HOLDOVER_PPM_FLOOR       50.0f
+// NTP-like PHI (ppm): never grow slower than this during holdover.
+#define CLK_HOLDOVER_PHI_PPM         15.0f
+// Extra uncertainty booked when entering / while in holdover (ms).
+#define CLK_HOLDOVER_ENTRY_MS       100
+// If root-quality exceeds this in holdover, drop to Unsynced early.
+#define CLK_HOLDOVER_MAX_QUALITY_MS 500
 // Task panic (LED stale) for this long → soft restart.
 #define LED_TASK_PANIC_RESTART_MS 15000
 // Restart if free heap stays below this (fragmentation / leak).

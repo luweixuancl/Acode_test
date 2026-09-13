@@ -438,7 +438,8 @@ void WebPortal::handleStatus() {
   ntp["stratum"] = syncOk ? 1 : 16;
   ntp["stratum1Ready"] = st.timeValid && st.clockState == ClockState::Locked && st.ppsFresh;
   ntp["refId"] = syncOk ? "GPSS" : "INIT";
-  ntp["li"] = syncOk ? (st.clockState == ClockState::Holdover ? 1 : 0) : 3;
+  // LI is leap-second indicator only; holdover stays LI=0 with rising dispersion.
+  ntp["li"] = syncOk ? 0 : 3;
   ntp["requests"] = ntp_ ? ntp_->requestCount() : 0;
 
   String out;

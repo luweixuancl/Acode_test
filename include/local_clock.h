@@ -44,6 +44,8 @@ class LocalClock {
   void tick(bool nmeaFresh, bool ppsFresh, AnomalyPolicy policy, uint16_t holdoverSec);
 
   bool nowUtc(uint32_t& seconds, uint32_t& fraction) const;
+  // Last PPS-aligned UTC second (fraction always 0). For NTP Reference Timestamp.
+  bool referenceUtc(uint32_t& seconds, uint32_t& fraction) const;
   uint32_t qualityMs() const;
 
   ClockState state() const { return state_; }

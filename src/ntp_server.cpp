@@ -29,38 +29,47 @@ void NtpServer::loop(const GpsService& gps) {
 }
 
 void NtpServer::handlePacket(const GpsService& gps) {
+  // Stamp receive as early as possible (before reading the payload).
+  uint32_t recvSec = 0;
+  uint32_t recvFrac = 0;
+  const bool haveTime = gps.nowUtc(recvSec, recvFrac);
+
   int len = udp_.read(packet_, sizeof(packet_));
   if (len < 48) {
     return;
   }
   requestCount_++;
 
-  uint32_t recvSec = 0;
-  uint32_t recvFrac = 0;
-  const bool haveTime = gps.nowUtc(recvSec, recvFrac);
   const bool ppsOk = gps.ppsFresh();
   const uint32_t qMs = gps.qualityMs();
   const ClockState clk = gps.snapshot().clockState;
 
   // LI | VN | Mode — only Locked/Degraded/Holdover are considered synchronized.
+  // Holdover keeps LI=0 (RFC LI is leap-second warning, not "in holdover");
+  // rising root dispersion + /status clock.state advertise free-run.
   const bool syncOk =
       haveTime && (clk == ClockState::Locked || clk == ClockState::Degraded ||
                    clk == ClockState::Holdover);
-  const bool holdover = syncOk && clk == ClockState::Holdover;
   uint32_t ntpSec = syncOk ? (recvSec + NTP_EPOCH_DELTA) : 0;
   uint32_t ntpFrac = syncOk ? recvFrac : 0;
-  // Holdover advertises LI=1 (alarm condition / last-minute warning); Locked/Degraded LI=0.
-  uint8_t li = syncOk ? (holdover ? 1 : 0) : 3;
+  uint8_t li = syncOk ? 0 : 3;
   uint8_t vn = (packet_[0] >> 3) & 0x07;
   if (vn < 1 || vn > 4) {
     vn = 3;
   }
   packet_[0] = static_cast<uint8_t>((li << 6) | (vn << 3) | 4);  // server mode
   packet_[1] = syncOk ? 1 : 16;                                  // stratum
-  packet_[2] = 4;                                                // poll
-  packet_[3] = syncOk ? (ppsOk ? static_cast<uint8_t>(-10) : static_cast<uint8_t>(-6)) : 0xEC;
+  // Echo client poll when plausible; otherwise advertise 16s (4).
+  uint8_t poll = packet_[2];
+  if (poll < 4 || poll > 17) {
+    poll = 4;
+  }
+  packet_[2] = poll;
+  // Unsync: coarse precision (not a fake sub-µs claim). Sync: PPS → -10 else -6.
+  packet_[3] = syncOk ? (ppsOk ? static_cast<uint8_t>(-10) : static_cast<uint8_t>(-6))
+                       : static_cast<uint8_t>(-6);
 
-  memset(packet_ + 4, 0, 4);
+  memset(packet_ + 4, 0, 4);  // root delay
 
   uint32_t dispersion = 0;
   if (!syncOk || qMs == 0xFFFFFFFF) {
@@ -87,9 +96,14 @@ void NtpServer::handlePacket(const GpsService& gps) {
     packet_[15] = 'T';
   }
 
-  // Reference timestamp: PPS-aligned whole second when possible
-  uint32_t refFrac = (syncOk && ppsOk) ? 0 : ntpFrac;
-  writeTimestamp(packet_, 16, ntpSec, refFrac);
+  // Reference timestamp = last PPS-aligned UTC second (frac 0).
+  uint32_t refSec = 0;
+  uint32_t refFrac = 0;
+  if (syncOk && gps.referenceUtc(refSec, refFrac)) {
+    writeTimestamp(packet_, 16, refSec + NTP_EPOCH_DELTA, refFrac);
+  } else {
+    writeTimestamp(packet_, 16, ntpSec, syncOk ? ntpFrac : 0);
+  }
 
   // Originate = client's transmit
   memcpy(packet_ + 24, packet_ + 40, 8);
