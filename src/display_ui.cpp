@@ -4,13 +4,14 @@
 #include <Wire.h>
 #include <WiFi.h>
 
+// Size-2 (12×16) fits 10 glyphs on 128px including the ">" cursor.
 static const char* MENU_LABELS[] = {
     "WiFi Scan",
     "Web Setup",
-    "Set Static IP",
+    "Static IP",
     "Use DHCP",
     "Timezone",
-    "Anomaly Mode",
+    "Anomaly",
     "NTP ACL",
     "Temp Comp",
     "NTP Stats",
@@ -319,55 +320,78 @@ void DisplayUi::drawHome(const GpsStatus& st, const WifiManager& wifi, const App
 }
 
 void DisplayUi::drawMenu() {
-  display_.setCursor(0, 0);
-  display_.println("Menu  long=Back");
   const uint8_t count = static_cast<uint8_t>(MenuItem::Count);
-  const uint8_t visible = 5;
+  const uint8_t visible = 4;
+  const uint8_t rowH = 16;
   uint8_t start = 0;
   if (menuIndex_ >= visible) {
     start = menuIndex_ - visible + 1;
   }
+  display_.setTextSize(2);
   for (uint8_t row = 0; row < visible; ++row) {
     const uint8_t i = static_cast<uint8_t>(start + row);
     if (i >= count) {
       break;
     }
-    display_.setCursor(0, 12 + row * 10);
-    display_.print(i == menuIndex_ ? ">" : " ");
+    const int16_t y = static_cast<int16_t>(row * rowH);
+    const bool sel = (i == menuIndex_);
+    if (sel) {
+      display_.fillRect(0, y, 128, rowH, SH110X_WHITE);
+      display_.setTextColor(SH110X_BLACK, SH110X_WHITE);
+    } else {
+      display_.setTextColor(SH110X_WHITE);
+    }
+    display_.setCursor(0, y);
+    display_.print(sel ? '>' : ' ');
     display_.print(MENU_LABELS[i]);
   }
+  display_.setTextSize(1);
+  display_.setTextColor(SH110X_WHITE);
 }
 
 void DisplayUi::drawWifiScan() {
-  display_.setCursor(0, 0);
-  display_.println("WiFi list click=OK");
   if (scanPending_) {
-    display_.setCursor(0, 20);
-    display_.println("Scanning...");
-    display_.setCursor(0, 40);
+    display_.setTextSize(2);
+    display_.setCursor(4, 16);
+    display_.println("Scanning");
+    display_.setTextSize(1);
+    display_.setCursor(0, 48);
     display_.println("long=back");
     return;
   }
   if (networks_.empty()) {
-    display_.setCursor(0, 20);
+    display_.setTextSize(2);
+    display_.setCursor(4, 8);
     if (scanError_.length()) {
-      display_.println(scanError_);
+      String e = scanError_;
+      if (e.length() > 10) {
+        e = e.substring(0, 10);
+      }
+      display_.println(e);
     } else {
       display_.println("No APs");
     }
-    display_.setCursor(0, 40);
+    display_.setTextSize(1);
+    display_.setCursor(0, 48);
     display_.println("click=retry");
     return;
   }
   const int visible = 4;
   int start = max(0, static_cast<int>(wifiIndex_) - visible + 1);
+  display_.setTextSize(2);
   for (int row = 0; row < visible; ++row) {
     int idx = start + row;
     if (idx >= static_cast<int>(networks_.size())) {
       break;
     }
-    display_.setCursor(0, 12 + row * 12);
-    display_.print(idx == wifiIndex_ ? ">" : " ");
+    const int16_t y = static_cast<int16_t>(row * 16);
+    const bool sel = (idx == static_cast<int>(wifiIndex_));
+    if (sel) {
+      display_.fillRect(0, y, 128, 16, SH110X_WHITE);
+      display_.setTextColor(SH110X_BLACK, SH110X_WHITE);
+    } else {
+      display_.setTextColor(SH110X_WHITE);
+    }
     String line = networks_[idx].ssid;
     bool ascii = true;
     for (size_t k = 0; k < line.length(); ++k) {
@@ -378,14 +402,18 @@ void DisplayUi::drawWifiScan() {
       }
     }
     if (!ascii) {
-      char hex[20];
+      char hex[12];
       snprintf(hex, sizeof(hex), "AP %ddBm", static_cast<int>(networks_[idx].rssi));
       line = hex;
-    } else if (line.length() > 16) {
-      line = line.substring(0, 16);
+    } else if (line.length() > 9) {
+      line = line.substring(0, 9);
     }
+    display_.setCursor(0, y);
+    display_.print(sel ? '>' : ' ');
     display_.print(line);
   }
+  display_.setTextSize(1);
+  display_.setTextColor(SH110X_WHITE);
 }
 
 void DisplayUi::drawPassword() {
@@ -436,13 +464,15 @@ void DisplayUi::drawSetIp() {
 
 void DisplayUi::drawTimezone(const AppSettings& settings) {
   display_.setCursor(0, 0);
-  display_.println("Timezone UTC offset");
-  display_.setCursor(0, 24);
+  display_.println("Timezone");
+  display_.setTextSize(2);
+  display_.setCursor(16, 20);
   display_.print("UTC");
   if (settings.timezoneHours >= 0) {
     display_.print("+");
   }
   display_.print(settings.timezoneHours);
+  display_.setTextSize(1);
   display_.setCursor(0, 48);
   display_.print("rot=chg click=save");
 }
@@ -450,10 +480,12 @@ void DisplayUi::drawTimezone(const AppSettings& settings) {
 void DisplayUi::drawAnomaly(const AppSettings& settings) {
   (void)settings;
   display_.setCursor(0, 0);
-  display_.println("Anomaly Mode");
+  display_.println("Anomaly");
+  display_.setTextSize(2);
   display_.setCursor(0, 16);
   display_.print(">");
   display_.println(anomalyPolicyMenuLabel(editPolicy_));
+  display_.setTextSize(1);
   display_.setCursor(0, 40);
   display_.println("rot=chg click=save");
   display_.setCursor(0, 52);
@@ -461,19 +493,20 @@ void DisplayUi::drawAnomaly(const AppSettings& settings) {
 }
 
 void DisplayUi::drawTempComp(const AppSettings& settings) {
-  (void)settings;
   display_.setCursor(0, 0);
   display_.println("Temp Comp");
+  display_.setTextSize(2);
   display_.setCursor(0, 14);
   display_.print(">");
   display_.println(editTempComp_ ? "On" : "Off");
-  display_.setCursor(0, 28);
+  display_.setTextSize(1);
+  display_.setCursor(0, 32);
   display_.print("k=");
   display_.print(tempCoeffPpmPerC(settings.tempCoeffCenti), 2);
   display_.println(" ppm/C");
-  display_.setCursor(0, 42);
+  display_.setCursor(0, 44);
   display_.println("coeff via Web");
-  display_.setCursor(0, 54);
+  display_.setCursor(0, 56);
   display_.println("rot=on/off save");
 }
 
@@ -481,17 +514,19 @@ void DisplayUi::drawAcl(const AppSettings& settings) {
   (void)settings;
   display_.setCursor(0, 0);
   display_.println("NTP ACL");
+  display_.setTextSize(2);
   display_.setCursor(0, 14);
   display_.print(">");
   display_.println(ntpAclModeMenuLabel(editAclMode_));
-  display_.setCursor(0, 28);
+  display_.setTextSize(1);
+  display_.setCursor(0, 32);
   display_.print("IPs: ");
   display_.print(editAclCount_);
   display_.print("/");
   display_.println(NTP_ACL_MAX_ENTRIES);
-  display_.setCursor(0, 42);
+  display_.setCursor(0, 44);
   display_.println("edit list via Web");
-  display_.setCursor(0, 54);
+  display_.setCursor(0, 56);
   display_.println("rot=mode click=save");
 }
 
@@ -519,8 +554,14 @@ void DisplayUi::drawNtpStats(const NtpServer& ntp) {
 }
 
 void DisplayUi::drawMessage() {
-  display_.setCursor(0, 20);
-  display_.println(message_);
+  display_.setTextSize(2);
+  String line = message_;
+  if (line.length() > 10) {
+    line = line.substring(0, 10);
+  }
+  display_.setCursor(4, 20);
+  display_.println(line);
+  display_.setTextSize(1);
 }
 
 void DisplayUi::drawWebHint() {
