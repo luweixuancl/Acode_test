@@ -9,3 +9,4 @@ ntp_*.log
 ntp_monitor_latest.txt
 analyze_ntp.py
 monitor_ntp.py
+AGENTS.md
