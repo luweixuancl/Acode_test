@@ -7,7 +7,8 @@ bool ipcInit() {
   gIpc.netReq = xQueueCreate(8, sizeof(NetRequest));
   gIpc.uiMsg = xQueueCreate(8, sizeof(UiMsg));
   gIpc.settingsMutex = xSemaphoreCreateMutex();
-  return gIpc.netReq && gIpc.uiMsg && gIpc.settingsMutex;
+  gIpc.scanMutex = xSemaphoreCreateMutex();
+  return gIpc.netReq && gIpc.uiMsg && gIpc.settingsMutex && gIpc.scanMutex;
 }
 
 bool settingsLock(TickType_t ticks) {

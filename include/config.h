@@ -65,7 +65,9 @@
 // Ignore local ASSOC_LEAVE (8) etc. right after our own disconnect()+begin().
 #define WIFI_DISC_GRACE_MS       2500
 #define WIFI_SCAN_TIMEOUT_MS    15000  // async scan must not hang reconnect give-up
-#define WIFI_SCAN_CACHE_MS       8000  // reuse lastScan_ so /scan does not scanDelete()
+// OLED keeps "Scanning..." across STA join + one radio scan; only then show fail.
+#define WIFI_SCAN_UI_TIMEOUT_MS 40000
+#define WIFI_SCAN_CACHE_MS       8000  // reuse lastScan_ instead of scanDelete()
 #define IP_CONFLICT_TIMEOUT_MS   800
 // Auto-reconnect backoff (ms): attempt 1 immediate, then 2s/5s/10s/30s...
 #define WIFI_RECONNECT_MAX_ATTEMPTS    5
