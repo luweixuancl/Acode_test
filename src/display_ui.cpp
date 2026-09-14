@@ -615,6 +615,33 @@ void DisplayUi::drawMessage() {
     return;
   }
 
+  // Two centered 9pt lines: split at the most balanced space where both
+  // halves still fit one 9pt row (11 chars × 11 px = 121 ≤ 124).
+  int bestSplit = -1;
+  uint16_t bestDiff = 0xFFFF;
+  const int len = static_cast<int>(message_.length());
+  for (int i = 0; i < len; ++i) {
+    if (message_[i] != ' ') {
+      continue;
+    }
+    const int aLen = i;
+    const int bLen = len - i - 1;
+    if (aLen == 0 || bLen == 0 || aLen > 11 || bLen > 11) {
+      continue;
+    }
+    const uint16_t diff = aLen > bLen ? static_cast<uint16_t>(aLen - bLen)
+                                      : static_cast<uint16_t>(bLen - aLen);
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      bestSplit = i;
+    }
+  }
+  if (bestSplit >= 0) {
+    monoLine(display_, 12, message_.substring(0, bestSplit).c_str(), true);
+    monoLine(display_, 38, message_.substring(bestSplit + 1).c_str(), true);
+    return;
+  }
+
   // Long toast: wrap 6×8 instead of chopping characters.
   const uint8_t cpl = 21;
   uint8_t row = 0;
