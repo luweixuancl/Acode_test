@@ -3,9 +3,10 @@
 #include "ntp_server.h"
 #include <Wire.h>
 #include <WiFi.h>
-#include <Fonts/FreeSans9pt7b.h>
+#include <Fonts/FreeSerif9pt7b.h>
 
-// FreeSans 9pt ~12px caps; 10 glyphs usually fit on 128px.
+// FreeSerif 9pt (Times-like). Menu / large single-line values only.
+// Dense 6-line pages stay on the built-in 6×8 so they do not pack.
 static const char* MENU_LABELS[] = {
     "WiFi Scan",
     "Web Setup",
@@ -23,7 +24,7 @@ static const char PWD_CHARS[] =
     "<ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%&*-_.";
 
 static void menuFontBegin(Adafruit_SH1107& d) {
-  d.setFont(&FreeSans9pt7b);
+  d.setFont(&FreeSerif9pt7b);
   d.setTextSize(1);
   d.setTextWrap(false);
 }
@@ -32,6 +33,23 @@ static void menuFontEnd(Adafruit_SH1107& d) {
   d.setFont(nullptr);
   d.setTextSize(1);
   d.setTextColor(SH110X_WHITE);
+}
+
+static uint16_t serifWidth(Adafruit_SH1107& d, const char* text) {
+  int16_t x1 = 0, y1 = 0;
+  uint16_t w = 0, h = 0;
+  d.getTextBounds(text, 0, 0, &x1, &y1, &w, &h);
+  return w;
+}
+
+static void serifLine(Adafruit_SH1107& d, int16_t top, const char* text, bool center) {
+  menuFontBegin(d);
+  d.setTextColor(SH110X_WHITE);
+  const uint16_t w = serifWidth(d, text);
+  const int16_t x = center ? static_cast<int16_t>((128 - w) / 2) : 0;
+  d.setCursor(x < 0 ? 0 : x, top + OLED_MENU_BASELINE);
+  d.print(text);
+  menuFontEnd(d);
 }
 
 static void menuDrawRow(Adafruit_SH1107& d, int16_t y, bool sel, const char* text) {
@@ -61,7 +79,7 @@ void DisplayUi::begin() {
   display_.println("ESP32-C3 NTP");
   display_.println("Booting...");
   display_.display();
-  Serial.printf("[ui] OLED menu vector FreeSans9pt rows=%u rowH=%u mark=%s\n",
+  Serial.printf("[ui] OLED menu FreeSerif9pt rows=%u rowH=%u mark=%s\n",
                 static_cast<unsigned>(OLED_MENU_ROWS),
                 static_cast<unsigned>(OLED_MENU_ROW_H), OLED_UI_MARK);
 }
@@ -295,10 +313,7 @@ void DisplayUi::drawHome(const GpsStatus& st, const WifiManager& wifi, const App
   } else {
     snprintf(timeBuf, sizeof(timeBuf), "--:--:--");
   }
-  display_.setTextSize(2);
-  // 8 glyphs × 12 px = 96; center on 128
-  display_.setCursor(16, 16);
-  display_.print(timeBuf);
+  serifLine(display_, 16, timeBuf, true);
 
   // --- SSID (secondary) ---
   display_.setTextSize(1);
@@ -469,14 +484,10 @@ void DisplayUi::drawSetIp() {
 void DisplayUi::drawTimezone(const AppSettings& settings) {
   display_.setCursor(0, 0);
   display_.println("Timezone");
-  display_.setTextSize(2);
-  display_.setCursor(16, 20);
-  display_.print("UTC");
-  if (settings.timezoneHours >= 0) {
-    display_.print("+");
-  }
-  display_.print(settings.timezoneHours);
-  display_.setTextSize(1);
+  char off[12];
+  snprintf(off, sizeof(off), "UTC%s%d", settings.timezoneHours >= 0 ? "+" : "",
+           static_cast<int>(settings.timezoneHours));
+  serifLine(display_, 20, off, true);
   display_.setCursor(0, 48);
   display_.print("rot=chg click=save");
 }
@@ -485,11 +496,9 @@ void DisplayUi::drawAnomaly(const AppSettings& settings) {
   (void)settings;
   display_.setCursor(0, 0);
   display_.println("Anomaly");
-  display_.setTextSize(2);
-  display_.setCursor(0, 16);
-  display_.print(">");
-  display_.println(anomalyPolicyMenuLabel(editPolicy_));
-  display_.setTextSize(1);
+  char line[20];
+  snprintf(line, sizeof(line), ">%s", anomalyPolicyMenuLabel(editPolicy_));
+  serifLine(display_, 16, line, false);
   display_.setCursor(0, 40);
   display_.println("rot=chg click=save");
   display_.setCursor(0, 52);
@@ -499,11 +508,7 @@ void DisplayUi::drawAnomaly(const AppSettings& settings) {
 void DisplayUi::drawTempComp(const AppSettings& settings) {
   display_.setCursor(0, 0);
   display_.println("Temp Comp");
-  display_.setTextSize(2);
-  display_.setCursor(0, 14);
-  display_.print(">");
-  display_.println(editTempComp_ ? "On" : "Off");
-  display_.setTextSize(1);
+  serifLine(display_, 14, editTempComp_ ? ">On" : ">Off", false);
   display_.setCursor(0, 32);
   display_.print("k=");
   display_.print(tempCoeffPpmPerC(settings.tempCoeffCenti), 2);
@@ -518,11 +523,9 @@ void DisplayUi::drawAcl(const AppSettings& settings) {
   (void)settings;
   display_.setCursor(0, 0);
   display_.println("NTP ACL");
-  display_.setTextSize(2);
-  display_.setCursor(0, 14);
-  display_.print(">");
-  display_.println(ntpAclModeMenuLabel(editAclMode_));
-  display_.setTextSize(1);
+  char mode[20];
+  snprintf(mode, sizeof(mode), ">%s", ntpAclModeMenuLabel(editAclMode_));
+  serifLine(display_, 14, mode, false);
   display_.setCursor(0, 32);
   display_.print("IPs: ");
   display_.print(editAclCount_);
@@ -558,14 +561,13 @@ void DisplayUi::drawNtpStats(const NtpServer& ntp) {
 }
 
 void DisplayUi::drawMessage() {
-  display_.setTextSize(2);
   String line = message_;
-  if (line.length() > 10) {
-    line = line.substring(0, 10);
+  menuFontBegin(display_);
+  while (line.length() > 1 && serifWidth(display_, line.c_str()) > 124) {
+    line.remove(line.length() - 1);
   }
-  display_.setCursor(4, 20);
-  display_.println(line);
-  display_.setTextSize(1);
+  menuFontEnd(display_);
+  serifLine(display_, 22, line.c_str(), true);
 }
 
 void DisplayUi::drawWebHint() {
