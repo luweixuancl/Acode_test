@@ -147,4 +147,4 @@ platformio.ini
 
 WiFi 事件 FSM、自动重连与 C3 无双核说明见 [docs/wifi_event_fsm.md](docs/wifi_event_fsm.md)。
 
-NTP 比对测试（GPS vs 本机/阿里云，2026-09-11）见 [docs/ntp_cmp_test_20260911.md](docs/ntp_cmp_test_20260911.md)。
+NTP 比对测试见 [docs/ntp_cmp_test_20260911.md](docs/ntp_cmp_test_20260911.md)（2026-09-11，PC）与 [docs/ntp_cmp_test_20260914.md](docs/ntp_cmp_test_20260914.md)（2026-09-14，Termux；原始 CSV [`docs/cmp_20260914_102829.csv`](docs/cmp_20260914_102829.csv)）。

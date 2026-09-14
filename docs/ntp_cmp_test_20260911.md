@@ -110,5 +110,6 @@
 
 ## 相关文档
 
+- [ntp_cmp_test_20260914.md](ntp_cmp_test_20260914.md) — 2026-09-14 Termux 比对（含 ACQ→LCK）  
 - [local_clock_gps_check.md](local_clock_gps_check.md) — LocalClock / residual / Holdover  
 - [wifi_event_fsm.md](wifi_event_fsm.md) — WiFi 事件与重连  
