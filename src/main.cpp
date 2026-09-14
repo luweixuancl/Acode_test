@@ -37,6 +37,7 @@ enum class NetWork : uint8_t {
 };
 
 static NetWork gNetWork = NetWork::Idle;
+static bool gScanUiPending = false;
 static AppSettings gPendingSta;
 static bool gStopApOnConnectOk = false;
 static bool gBootNeedApIfFail = true;
@@ -129,15 +130,19 @@ static void handleNetRequest(const NetRequest& req) {
       handleConnect(req.ssid, req.pass);
       break;
     case NetReqType::ScanWifi: {
-      if (gNetWork == NetWork::Scanning || gWifi.isScanRunning()) {
-        break;
-      }
-      // Encoder scan is explicit: drop a stuck join / reconnect so STA can scan.
-      if (gNetWork == NetWork::Connecting || gWifi.isConnecting()) {
+      gScanUiPending = true;
+      // Do not abort a live STA (scan while connected is normal).
+      if (!gWifi.isStaConnected() &&
+          (gNetWork == NetWork::Connecting || gWifi.isConnecting())) {
         gWifi.abortJoin();
         gNetWork = NetWork::Idle;
       }
-      if (gNetWork != NetWork::Idle || gWifi.isBusy()) {
+      if (gWifi.isScanRunning() || gWifi.scanState() == WifiScanState::Running) {
+        gNetWork = NetWork::Scanning;
+        Serial.println("[wifi] OLED adopted in-flight scan");
+        break;
+      }
+      if (gNetWork == NetWork::Probing) {
         UiMsg msg{};
         msg.type = UiMsgType::ScanFailed;
         strncpy(msg.text, "WiFi busy", sizeof(msg.text) - 1);
@@ -145,6 +150,10 @@ static void handleNetRequest(const NetRequest& req) {
         break;
       }
       if (!gWifi.startScan()) {
+        if (!gWifi.lastScan().empty()) {
+          gNetWork = NetWork::Scanning;
+          break;
+        }
         UiMsg msg{};
         msg.type = UiMsgType::ScanFailed;
         strncpy(msg.text, "start fail", sizeof(msg.text) - 1);
@@ -256,6 +265,48 @@ static void pollDisconnectAndReconnect() {
   }
 }
 
+static void notifyScanToUi(const std::vector<WifiNetwork>& nets, bool ok) {
+  if (!gScanUiPending && gNetWork != NetWork::Scanning) {
+    return;
+  }
+  const std::vector<WifiNetwork>& src = (!ok || nets.empty()) ? gWifi.lastScan() : nets;
+  if (ok || !src.empty()) {
+    if (xSemaphoreTake(gIpc.scanMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+      gIpc.scanResults = src;
+      gIpc.scanReady = true;
+      xSemaphoreGive(gIpc.scanMutex);
+    }
+    UiMsg msg{};
+    msg.type = UiMsgType::ScanResult;
+    xQueueSend(gIpc.uiMsg, &msg, 0);
+    Serial.printf("[wifi] scan → UI kept=%u\n", static_cast<unsigned>(src.size()));
+  } else {
+    UiMsg msg{};
+    msg.type = UiMsgType::ScanFailed;
+    strncpy(msg.text, "scan fail", sizeof(msg.text) - 1);
+    xQueueSend(gIpc.uiMsg, &msg, 0);
+    Serial.println("[wifi] scan → UI fail");
+  }
+  gScanUiPending = false;
+  if (gNetWork == NetWork::Scanning) {
+    gNetWork = NetWork::Idle;
+  }
+}
+
+static void driveScan() {
+  const bool need = gNetWork == NetWork::Scanning || gWifi.isScanRunning() ||
+                    gWifi.peekScanDone() || gWifi.scanState() == WifiScanState::Running;
+  if (!need) {
+    return;
+  }
+  std::vector<WifiNetwork> nets;
+  const WifiScanState st = gWifi.pollScan(&nets);
+  if (st == WifiScanState::Running) {
+    return;
+  }
+  notifyScanToUi(nets, st == WifiScanState::Done || !gWifi.lastScan().empty());
+}
+
 static void pollNetWork() {
   pollDisconnectAndReconnect();
 
@@ -266,32 +317,6 @@ static void pollNetWork() {
         break;
       }
       finishConnect(st);
-      break;
-    }
-    case NetWork::Scanning: {
-      std::vector<WifiNetwork> nets;
-      const WifiScanState st = gWifi.pollScan(&nets);
-      if (st == WifiScanState::Running) {
-        break;
-      }
-      gNetWork = NetWork::Idle;
-      if (st == WifiScanState::Done) {
-        if (xSemaphoreTake(gIpc.scanMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
-          gIpc.scanResults = nets;
-          gIpc.scanReady = true;
-          xSemaphoreGive(gIpc.scanMutex);
-        }
-        UiMsg msg;
-        msg.type = UiMsgType::ScanResult;
-        msg.text[0] = '\0';
-        xQueueSend(gIpc.uiMsg, &msg, 0);
-        Serial.printf("[wifi] scan → UI kept=%u\n", static_cast<unsigned>(nets.size()));
-      } else {
-        UiMsg msg{};
-        msg.type = UiMsgType::ScanFailed;
-        strncpy(msg.text, "scan fail", sizeof(msg.text) - 1);
-        xQueueSend(gIpc.uiMsg, &msg, 0);
-      }
       break;
     }
     case NetWork::Probing: {
@@ -310,6 +335,7 @@ static void pollNetWork() {
       }
       break;
     }
+    case NetWork::Scanning:
     case NetWork::Idle:
     default:
       break;
@@ -436,6 +462,9 @@ static void taskNet(void* /*arg*/) {
   }
 
   for (;;) {
+    // Harvest SCAN_DONE before any new scanNetworks() (which scanDelete()s).
+    driveScan();
+
     NetRequest req;
     while (xQueueReceive(gIpc.netReq, &req, 0) == pdTRUE) {
       handleNetRequest(req);
@@ -446,6 +475,7 @@ static void taskNet(void* /*arg*/) {
       handleConnect(ssid.c_str(), pass.c_str());
     }
 
+    driveScan();
     pollNetWork();
     gPortal.loop();
     static uint8_t heapLowStreak = 0;

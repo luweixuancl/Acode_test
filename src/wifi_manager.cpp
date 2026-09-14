@@ -24,6 +24,22 @@ bool WifiManager::takeEventBit(WifiEvtBits bit) {
   return had;
 }
 
+bool WifiManager::peekEventBit(WifiEvtBits bit) {
+  const uint32_t mask = static_cast<uint32_t>(bit);
+  portENTER_CRITICAL(&evtMux_);
+  const bool had = (evtFlags_ & mask) != 0;
+  portEXIT_CRITICAL(&evtMux_);
+  return had;
+}
+
+bool WifiManager::peekScanDone() {
+  if (peekEventBit(WifiEvtBits::ScanDone)) {
+    return true;
+  }
+  const int16_t n = WiFi.scanComplete();
+  return n >= 0;
+}
+
 void WifiManager::onWifiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
   WifiManager* self = instance_;
   if (self == nullptr) {
@@ -420,15 +436,31 @@ String WifiManager::macAddress() const {
 }
 
 bool WifiManager::startScan() {
-  if (isConnecting() || isProbeRunning()) {
-    Serial.println("[wifi] scan refused (connecting/probe)");
+  if (isProbeRunning()) {
+    Serial.println("[wifi] scan refused (probe)");
+    return false;
+  }
+  if (isConnecting() && !isStaConnected()) {
+    Serial.println("[wifi] scan refused (connecting)");
     return false;
   }
   if (scanState_ == WifiScanState::Running) {
     return true;
   }
 
-  // SoftAP escape is WIFI_AP-only; scan needs a STA interface.
+  // scanNetworks() always scanDelete()s. Copy Arduino results first or OLED
+  // sees SCAN_DONE num=N and then harvest failed / empty.
+  const bool evt = peekEventBit(WifiEvtBits::ScanDone);
+  const int16_t pending = WiFi.scanComplete();
+  if (evt || pending >= 0) {
+    harvestScanResults();
+    if (scanState_ == WifiScanState::Done && !lastScan_.empty()) {
+      Serial.printf("[wifi] scan reused pending kept=%u\n",
+                    static_cast<unsigned>(lastScan_.size()));
+      return true;
+    }
+  }
+
   const wifi_mode_t mode = WiFi.getMode();
   if (mode == WIFI_AP || mode == WIFI_OFF) {
     Serial.printf("[wifi] scan: mode %d → AP_STA\n", static_cast<int>(mode));
@@ -438,8 +470,6 @@ bool WifiManager::startScan() {
 
   takeEventBit(WifiEvtBits::ScanDone);
 
-  // show_hidden + longer per-channel time: Arduino scanComplete() times out at
-  // max_ms_per_chan*20 (default 6s) which is easy to miss on a busy 2.4 GHz.
   int16_t r = WiFi.scanNetworks(/*async=*/true, /*hidden=*/true, /*passive=*/false,
                                 /*max_ms_per_chan=*/800);
   if (r == WIFI_SCAN_FAILED) {

@@ -66,6 +66,7 @@ class WifiManager {
   WifiScanState scanState() const { return scanState_; }
   const std::vector<WifiNetwork>& lastScan() const { return lastScan_; }
   uint32_t lastHarvestMs() const { return lastHarvestMs_; }
+  bool peekScanDone();
   WifiScanState pollScan(std::vector<WifiNetwork>* out);
 
   // Non-blocking ARP conflict probe (requires STA up).
@@ -98,6 +99,7 @@ class WifiManager {
 
   void setEventBit(WifiEvtBits bit);
   bool takeEventBit(WifiEvtBits bit);
+  bool peekEventBit(WifiEvtBits bit);
   void harvestScanResults();
   static uint32_t backoffMsForAttempt(uint8_t attempt);
 

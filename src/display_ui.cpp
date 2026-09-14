@@ -64,10 +64,14 @@ void DisplayUi::drainUiMessages() {
         showMessage(String(msg.text));
       }
     } else if (msg.type == UiMsgType::ScanResult) {
-      if (xSemaphoreTake(gIpc.scanMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+      if (xSemaphoreTake(gIpc.scanMutex, pdMS_TO_TICKS(80)) == pdTRUE) {
         onScanResults(gIpc.scanResults);
         gIpc.scanReady = false;
         xSemaphoreGive(gIpc.scanMutex);
+      } else if (gIpc.scanReady) {
+        scanPending_ = false;
+        scanError_ = "list busy";
+        mode_ = UiMode::WifiScan;
       }
     } else if (msg.type == UiMsgType::ScanFailed) {
       scanPending_ = false;
@@ -79,6 +83,13 @@ void DisplayUi::drainUiMessages() {
 
 void DisplayUi::loop(EncoderInput& enc, GpsService& gps, WifiManager& wifi, NtpServer& ntp) {
   drainUiMessages();
+  if (scanPending_ && gIpc.scanReady) {
+    if (xSemaphoreTake(gIpc.scanMutex, pdMS_TO_TICKS(20)) == pdTRUE) {
+      onScanResults(gIpc.scanResults);
+      gIpc.scanReady = false;
+      xSemaphoreGive(gIpc.scanMutex);
+    }
+  }
 
   int8_t rot = enc.consumeRotate();
   bool click = enc.consumeClick();
