@@ -438,10 +438,13 @@ bool WifiManager::startScan() {
 
   takeEventBit(WifiEvtBits::ScanDone);
 
-  int16_t r = WiFi.scanNetworks(/*async=*/true, /*hidden=*/false);
+  // show_hidden + longer per-channel time: Arduino scanComplete() times out at
+  // max_ms_per_chan*20 (default 6s) which is easy to miss on a busy 2.4 GHz.
+  int16_t r = WiFi.scanNetworks(/*async=*/true, /*hidden=*/true, /*passive=*/false,
+                                /*max_ms_per_chan=*/800);
   if (r == WIFI_SCAN_FAILED) {
     delay(50);
-    r = WiFi.scanNetworks(/*async=*/true, /*hidden=*/false);
+    r = WiFi.scanNetworks(/*async=*/true, /*hidden=*/true, /*passive=*/false, 800);
   }
   if (r == WIFI_SCAN_FAILED) {
     scanState_ = WifiScanState::Failed;
@@ -460,25 +463,37 @@ void WifiManager::harvestScanResults() {
     return;
   }
   if (n < 0) {
-    lastScan_.clear();
+    Serial.printf("[wifi] harvest failed scanComplete=%d\n", static_cast<int>(n));
     scanState_ = WifiScanState::Failed;
     WiFi.scanDelete();
     return;
   }
 
   lastScan_.clear();
-  lastScan_.reserve(static_cast<size_t>(n));
+  lastScan_.reserve(static_cast<size_t>(n > 0 ? n : 0));
   for (int i = 0; i < n; ++i) {
     WifiNetwork net;
-    net.ssid = WiFi.SSID(i);
-    net.rssi = WiFi.RSSI(i);
-    net.enc = WiFi.encryptionType(i);
-    if (net.ssid.length() > 0) {
-      lastScan_.push_back(net);
+    uint8_t enc = 0;
+    int32_t rssi = 0;
+    uint8_t* bssid = nullptr;
+    int32_t channel = 0;
+    if (!WiFi.getNetworkInfo(static_cast<uint8_t>(i), net.ssid, enc, rssi, bssid, channel)) {
+      net.ssid = WiFi.SSID(i);
+      rssi = WiFi.RSSI(i);
+      enc = static_cast<uint8_t>(WiFi.encryptionType(i));
     }
+    net.rssi = rssi;
+    net.enc = static_cast<wifi_auth_mode_t>(enc);
+    if (net.ssid.isEmpty()) {
+      net.ssid = "<hidden>";
+    }
+    lastScan_.push_back(net);
   }
+  lastHarvestMs_ = millis();
   WiFi.scanDelete();
   scanState_ = WifiScanState::Done;
+  Serial.printf("[wifi] harvest n=%d kept=%u\n", static_cast<int>(n),
+                static_cast<unsigned>(lastScan_.size()));
 }
 
 WifiScanState WifiManager::pollScan(std::vector<WifiNetwork>* out) {
@@ -494,12 +509,15 @@ WifiScanState WifiManager::pollScan(std::vector<WifiNetwork>* out) {
 
   // Prefer SCAN_DONE; also poll complete as dual insurance.
   const bool doneEvt = takeEventBit(WifiEvtBits::ScanDone);
-  const int16_t n = WiFi.scanComplete();
+  int16_t n = WiFi.scanComplete();
+  if (doneEvt && n == WIFI_SCAN_RUNNING) {
+    delay(20);
+    n = WiFi.scanComplete();
+  }
   if (!doneEvt && n == WIFI_SCAN_RUNNING) {
     if (static_cast<int32_t>(millis() - scanStartedMs_) >= static_cast<int32_t>(WIFI_SCAN_TIMEOUT_MS)) {
       Serial.println("[wifi] scan timeout — abort");
       WiFi.scanDelete();
-      lastScan_.clear();
       scanState_ = WifiScanState::Failed;
       return scanState_;
     }
@@ -507,6 +525,12 @@ WifiScanState WifiManager::pollScan(std::vector<WifiNetwork>* out) {
   }
 
   harvestScanResults();
+  if (scanState_ == WifiScanState::Failed && doneEvt) {
+    // Arduino scanComplete() can say FAILED while SCAN_DONE already carried APs.
+    Serial.println("[wifi] harvest retry after SCAN_DONE");
+    delay(20);
+    harvestScanResults();
+  }
   if (out != nullptr && scanState_ == WifiScanState::Done) {
     *out = lastScan_;
   }

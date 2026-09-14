@@ -59,7 +59,10 @@ void DisplayUi::drainUiMessages() {
   UiMsg msg;
   while (xQueueReceive(gIpc.uiMsg, &msg, 0) == pdTRUE) {
     if (msg.type == UiMsgType::Text) {
-      showMessage(String(msg.text));
+      // Stay on the scan/password screens; STA scan often emits "WiFi lost"/"OK IP".
+      if (mode_ != UiMode::WifiScan && mode_ != UiMode::WifiPassword && !scanPending_) {
+        showMessage(String(msg.text));
+      }
     } else if (msg.type == UiMsgType::ScanResult) {
       if (xSemaphoreTake(gIpc.scanMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
         onScanResults(gIpc.scanResults);
@@ -339,7 +342,19 @@ void DisplayUi::drawWifiScan() {
     display_.setCursor(0, 12 + row * 12);
     display_.print(idx == wifiIndex_ ? ">" : " ");
     String line = networks_[idx].ssid;
-    if (line.length() > 16) {
+    bool ascii = true;
+    for (size_t k = 0; k < line.length(); ++k) {
+      const uint8_t c = static_cast<uint8_t>(line[k]);
+      if (c < 32 || c > 126) {
+        ascii = false;
+        break;
+      }
+    }
+    if (!ascii) {
+      char hex[20];
+      snprintf(hex, sizeof(hex), "AP %ddBm", static_cast<int>(networks_[idx].rssi));
+      line = hex;
+    } else if (line.length() > 16) {
       line = line.substring(0, 16);
     }
     display_.print(line);

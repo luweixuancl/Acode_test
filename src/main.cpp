@@ -219,13 +219,16 @@ static void pollDisconnectAndReconnect() {
   }
 
   // Connecting owns DISC via pollConnect; elsewhere consume link-loss edges.
-  if (gNetWork != NetWork::Connecting) {
+  // STA scan hops channels and often posts a transient DISC — do not steal the OLED.
+  if (gNetWork != NetWork::Connecting && gNetWork != NetWork::Scanning) {
     uint16_t discReason = 0;
     if (gWifi.consumeDisconnect(&discReason)) {
       char buf[40];
       snprintf(buf, sizeof(buf), "WiFi lost (%u)", discReason);
       postUiText(buf);
     }
+  } else if (gNetWork == NetWork::Scanning) {
+    gWifi.consumeDisconnect(nullptr);
   }
 
   if (gWifi.consumeReconnectGiveUp()) {
@@ -282,9 +285,7 @@ static void pollNetWork() {
         msg.type = UiMsgType::ScanResult;
         msg.text[0] = '\0';
         xQueueSend(gIpc.uiMsg, &msg, 0);
-        if (nets.empty()) {
-          Serial.println("[wifi] scan done: 0 APs");
-        }
+        Serial.printf("[wifi] scan → UI kept=%u\n", static_cast<unsigned>(nets.size()));
       } else {
         UiMsg msg{};
         msg.type = UiMsgType::ScanFailed;

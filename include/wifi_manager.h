@@ -65,6 +65,7 @@ class WifiManager {
   bool isScanRunning() const { return scanState_ == WifiScanState::Running; }
   WifiScanState scanState() const { return scanState_; }
   const std::vector<WifiNetwork>& lastScan() const { return lastScan_; }
+  uint32_t lastHarvestMs() const { return lastHarvestMs_; }
   WifiScanState pollScan(std::vector<WifiNetwork>* out);
 
   // Non-blocking ARP conflict probe (requires STA up).
@@ -112,6 +113,7 @@ class WifiManager {
 
   WifiScanState scanState_ = WifiScanState::Idle;
   uint32_t scanStartedMs_ = 0;
+  uint32_t lastHarvestMs_ = 0;
   std::vector<WifiNetwork> lastScan_;
 
   WifiProbeState probeState_ = WifiProbeState::Idle;

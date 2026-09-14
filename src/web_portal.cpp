@@ -528,8 +528,12 @@ void WebPortal::handleScan() {
     return;
   }
 
-  // Start a new async scan when idle; Running shares SCAN_DONE → lastScan_ with OLED.
-  if (!wifi_->isScanRunning()) {
+  // Start a new async scan when idle. Reuse a fresh lastScan_ so /scan polling
+  // does not scanDelete() results the OLED is about to display.
+  const bool cacheFresh =
+      wifi_->scanState() == WifiScanState::Done && !wifi_->lastScan().empty() &&
+      static_cast<int32_t>(millis() - wifi_->lastHarvestMs()) < 3000;
+  if (!wifi_->isScanRunning() && !cacheFresh) {
     if (!wifi_->startScan()) {
       server_.send(503, "application/json", "{\"status\":\"busy\"}");
       return;
