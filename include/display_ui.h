@@ -64,7 +64,7 @@ class DisplayUi {
   void drawWebHint();
 
   void handleHome(int8_t rot, bool click);
-  void handleMenu(int8_t rot, bool click, bool longPress);
+  void handleMenu(int8_t rot, bool click, bool longPress, WifiManager& wifi);
   void handleWifiScan(int8_t rot, bool click, bool longPress);
   void handlePassword(int8_t rot, bool click, bool longPress);
   void handleSetIp(int8_t rot, bool click, bool longPress);

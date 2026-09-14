@@ -202,7 +202,7 @@ void DisplayUi::loop(EncoderInput& enc, GpsService& gps, WifiManager& wifi, NtpS
       handleHome(rot, click);
       break;
     case UiMode::Menu:
-      handleMenu(rot, click, longPress);
+      handleMenu(rot, click, longPress, wifi);
       break;
     case UiMode::WifiScan:
       handleWifiScan(rot, click, longPress);
@@ -663,7 +663,7 @@ void DisplayUi::handleHome(int8_t rot, bool click) {
   }
 }
 
-void DisplayUi::handleMenu(int8_t rot, bool click, bool longPress) {
+void DisplayUi::handleMenu(int8_t rot, bool click, bool longPress, WifiManager& wifi) {
   if (longPress) {
     mode_ = UiMode::Home;
     return;
@@ -693,9 +693,17 @@ void DisplayUi::handleMenu(int8_t rot, bool click, bool longPress) {
       break;
     }
     case MenuItem::SetStaticIp:
-      if (settingsLock(pdMS_TO_TICKS(50))) {
+      // Prefer the live STA address so the user edits the LAN IP they already have,
+      // not SoftAP 192.168.4.1 or a stale NVS placeholder.
+      if (wifi.isStaConnected()) {
+        editIp_ = wifi.localIp();
+      } else if (settingsLock(pdMS_TO_TICKS(50))) {
         editIp_ = gSettings.staticIp;
         settingsUnlock();
+        // SoftAP subnet is never a useful static-IP seed.
+        if (editIp_[0] == 192 && editIp_[1] == 168 && editIp_[2] == 4) {
+          editIp_ = IPAddress(192, 168, 1, 50);
+        }
       }
       ipOctet_ = 0;
       mode_ = UiMode::SetIp;
@@ -836,8 +844,15 @@ void DisplayUi::handleSetIp(int8_t rot, bool click, bool longPress) {
     if (settingsLock(pdMS_TO_TICKS(100))) {
       gSettings.staticIp = editIp_;
       gSettings.useStaticIp = true;
-      // Keep existing gateway when still on the same /24; otherwise default to .1.
+      // Prefer live STA gateway when editing on the same /24; else keep NVS or .1.
       IPAddress gw = gSettings.gateway;
+      if (WiFi.status() == WL_CONNECTED) {
+        const IPAddress curGw = WiFi.gatewayIP();
+        if (curGw[0] == editIp_[0] && curGw[1] == editIp_[1] && curGw[2] == editIp_[2] &&
+            static_cast<uint32_t>(curGw) != 0) {
+          gw = curGw;
+        }
+      }
       if (gw[0] != editIp_[0] || gw[1] != editIp_[1] || gw[2] != editIp_[2]) {
         gw = IPAddress(editIp_[0], editIp_[1], editIp_[2], 1);
       }
