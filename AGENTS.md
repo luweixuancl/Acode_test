@@ -33,6 +33,7 @@ Client check after GPS lock + PPS: `ntpdate -q <device-ip>` — expect stratum 1
 | `docs/ntp_cmp_test_20260911.md` | 10min NTP 比对：GPS vs 本机/阿里云（2026-09-11） |
 | `docs/ntp_cmp_test_20260914.md` | 10min NTP 比对：Termux vs 阿里云（2026-09-14，含 ACQ→LCK） |
 | `docs/clock_eval_two_ntp_cmp.md` | 两次比对 + LocalClock 优化后的算法评价 |
+| `docs/ntp_timestamp_eval.md` | NTP 打戳位置与「固定 23 ms」评估（不实现） |
 
 Headers in `include/`, implementations in `src/`. One class per pair.
 
