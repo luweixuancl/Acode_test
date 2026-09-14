@@ -3,9 +3,9 @@
 #include "ntp_server.h"
 #include <Wire.h>
 #include <WiFi.h>
-#include <Fonts/FreeSansBold9pt7b.h>
+#include <Fonts/FreeSans9pt7b.h>
 
-// FreeSansBold 9pt ~12px caps; 10 glyphs usually fit on 128px.
+// FreeSans 9pt ~12px caps; 10 glyphs usually fit on 128px.
 static const char* MENU_LABELS[] = {
     "WiFi Scan",
     "Web Setup",
@@ -23,7 +23,7 @@ static const char PWD_CHARS[] =
     "<ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%&*-_.";
 
 static void menuFontBegin(Adafruit_SH1107& d) {
-  d.setFont(&FreeSansBold9pt7b);
+  d.setFont(&FreeSans9pt7b);
   d.setTextSize(1);
   d.setTextWrap(false);
 }
@@ -61,7 +61,7 @@ void DisplayUi::begin() {
   display_.println("ESP32-C3 NTP");
   display_.println("Booting...");
   display_.display();
-  Serial.printf("[ui] OLED menu vector FreeSansBold9pt rows=%u rowH=%u mark=%s\n",
+  Serial.printf("[ui] OLED menu vector FreeSans9pt rows=%u rowH=%u mark=%s\n",
                 static_cast<unsigned>(OLED_MENU_ROWS),
                 static_cast<unsigned>(OLED_MENU_ROW_H), OLED_UI_MARK);
 }
