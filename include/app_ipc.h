@@ -24,6 +24,7 @@ struct NetRequest {
   char ssid[33] = {};
   char pass[65] = {};
   IPAddress staticIp;
+  uint32_t seq = 0;  // OLED scan generation; 0 = unspecified
 };
 
 enum class UiMsgType : uint8_t {
@@ -35,6 +36,7 @@ enum class UiMsgType : uint8_t {
 struct UiMsg {
   UiMsgType type = UiMsgType::Text;
   char text[48] = {};
+  uint32_t seq = 0;  // must match DisplayUi scanSeq_ for ScanResult/ScanFailed
   // Scan results: payload lives in shared scan buffer guarded by scanMutex.
 };
 

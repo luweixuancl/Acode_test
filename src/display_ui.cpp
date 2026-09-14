@@ -64,6 +64,9 @@ void DisplayUi::drainUiMessages() {
         showMessage(String(msg.text));
       }
     } else if (msg.type == UiMsgType::ScanResult) {
+      if (msg.seq != 0 && msg.seq != scanSeq_) {
+        continue;
+      }
       if (xSemaphoreTake(gIpc.scanMutex, pdMS_TO_TICKS(80)) == pdTRUE) {
         onScanResults(gIpc.scanResults);
         gIpc.scanReady = false;
@@ -74,6 +77,11 @@ void DisplayUi::drainUiMessages() {
         mode_ = UiMode::WifiScan;
       }
     } else if (msg.type == UiMsgType::ScanFailed) {
+      // Ignore leftover "start fail" from a previous request, or a fail
+      // that raced ahead of SCAN_DONE for this generation.
+      if (msg.seq != 0 && msg.seq != scanSeq_) {
+        continue;
+      }
       scanPending_ = false;
       scanError_ = msg.text[0] ? String(msg.text) : String("Scan failed");
       mode_ = UiMode::WifiScan;
@@ -83,6 +91,14 @@ void DisplayUi::drainUiMessages() {
 
 void DisplayUi::loop(EncoderInput& enc, GpsService& gps, WifiManager& wifi, NtpServer& ntp) {
   drainUiMessages();
+  if (scanPending_ && scanStartedMs_ != 0 &&
+      static_cast<int32_t>(millis() - scanStartedMs_) >=
+          static_cast<int32_t>(WIFI_SCAN_UI_TIMEOUT_MS)) {
+    scanPending_ = false;
+    if (networks_.empty() && !scanError_.length()) {
+      scanError_ = "timeout";
+    }
+  }
   if (scanPending_ && gIpc.scanReady) {
     if (xSemaphoreTake(gIpc.scanMutex, pdMS_TO_TICKS(20)) == pdTRUE) {
       onScanResults(gIpc.scanResults);
@@ -619,11 +635,17 @@ void DisplayUi::handleMenu(int8_t rot, bool click, bool longPress) {
 void DisplayUi::requestWifiScan() {
   NetRequest req;
   req.type = NetReqType::ScanWifi;
+  scanSeq_++;
+  if (scanSeq_ == 0) {
+    scanSeq_ = 1;
+  }
+  req.seq = scanSeq_;
   if (postNetRequest(req)) {
     scanPending_ = true;
     scanError_ = "";
-  } else {
-    scanPending_ = false;
+    scanStartedMs_ = millis();
+    networks_.clear();
+  } else if (!scanPending_) {
     scanError_ = "Scan busy";
   }
 }

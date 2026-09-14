@@ -82,6 +82,8 @@ class DisplayUi {
   uint8_t wifiIndex_ = 0;
   std::vector<WifiNetwork> networks_;
   bool scanPending_ = false;
+  uint32_t scanSeq_ = 0;
+  uint32_t scanStartedMs_ = 0;
   String scanError_;
   String password_;
   uint8_t pwdCursor_ = 0;

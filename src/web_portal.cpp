@@ -528,12 +528,15 @@ void WebPortal::handleScan() {
     return;
   }
 
-  // Start a new async scan when idle. Reuse a fresh lastScan_ so /scan polling
-  // does not scanDelete() results the OLED is about to display.
+  // Do not kick STA join or scanDelete() an in-flight OLED harvest.
+  if (wifi_->isConnecting() && !wifi_->isStaConnected()) {
+    server_.send(202, "application/json", "{\"status\":\"scanning\"}");
+    return;
+  }
   const bool cacheFresh =
       wifi_->scanState() == WifiScanState::Done && !wifi_->lastScan().empty() &&
-      static_cast<int32_t>(millis() - wifi_->lastHarvestMs()) < 3000;
-  if (!wifi_->isScanRunning() && !cacheFresh) {
+      static_cast<int32_t>(millis() - wifi_->lastHarvestMs()) < WIFI_SCAN_CACHE_MS;
+  if (!wifi_->isScanRunning() && !wifi_->peekScanDone() && !cacheFresh) {
     if (!wifi_->startScan()) {
       server_.send(503, "application/json", "{\"status\":\"busy\"}");
       return;

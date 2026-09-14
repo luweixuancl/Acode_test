@@ -30,7 +30,7 @@ bool postUiText(const char* text) {
   if (!gIpc.uiMsg) {
     return false;
   }
-  UiMsg msg;
+  UiMsg msg{};
   msg.type = UiMsgType::Text;
   strncpy(msg.text, text ? text : "", sizeof(msg.text) - 1);
   msg.text[sizeof(msg.text) - 1] = '\0';
