@@ -32,14 +32,10 @@ TaskHandle_t gTaskUi = nullptr;
 enum class NetWork : uint8_t {
   Idle = 0,
   Connecting = 1,
-  Scanning = 2,
-  Probing = 3,
+  Probing = 2,
 };
 
 static NetWork gNetWork = NetWork::Idle;
-static bool gScanUiPending = false;
-static uint32_t gScanUiSeq = 0;
-static uint32_t gScanWaitStartMs = 0;
 static AppSettings gPendingSta;
 static bool gStopApOnConnectOk = false;
 static bool gBootNeedApIfFail = true;
@@ -79,138 +75,12 @@ static void openSetupApIfNeeded(const char* uiMsg) {
   postUiText(uiMsg != nullptr ? uiMsg : "AP setup mode");
 }
 
-static void sendScanUi(UiMsgType type, const char* text) {
-  UiMsg msg{};
-  msg.type = type;
-  msg.seq = gScanUiSeq;
-  if (text != nullptr) {
-    strncpy(msg.text, text, sizeof(msg.text) - 1);
-  }
-  xQueueSend(gIpc.uiMsg, &msg, 0);
-}
-
-static bool scanCacheFresh(uint32_t maxAgeMs) {
-  return gWifi.scanState() == WifiScanState::Done && !gWifi.lastScan().empty() &&
-         static_cast<int32_t>(millis() - gWifi.lastHarvestMs()) < static_cast<int32_t>(maxAgeMs);
-}
-
-static void notifyScanToUi(const std::vector<WifiNetwork>& nets, bool ok);
-static void tryStartPendingScan();
-
-static void failScanUi(const char* why) {
-  sendScanUi(UiMsgType::ScanFailed, why);
-  Serial.printf("[wifi] scan → UI fail (%s)\n", why ? why : "");
-  gScanUiPending = false;
-  if (gNetWork == NetWork::Scanning) {
-    gNetWork = NetWork::Idle;
-  }
-}
-
-static void notifyScanToUi(const std::vector<WifiNetwork>& nets, bool ok) {
-  if (!gScanUiPending && gNetWork != NetWork::Scanning) {
-    return;
-  }
-  const std::vector<WifiNetwork>& src = (!ok || nets.empty()) ? gWifi.lastScan() : nets;
-  // Empty list is a real SCAN_DONE (0 APs), not a start-time failure.
-  if (ok || !src.empty()) {
-    if (xSemaphoreTake(gIpc.scanMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
-      gIpc.scanResults = src;
-      gIpc.scanReady = true;
-      xSemaphoreGive(gIpc.scanMutex);
-    }
-    sendScanUi(UiMsgType::ScanResult, nullptr);
-    Serial.printf("[wifi] scan → UI kept=%u\n", static_cast<unsigned>(src.size()));
-    gScanUiPending = false;
-    if (gNetWork == NetWork::Scanning) {
-      gNetWork = NetWork::Idle;
-    }
-    return;
-  }
-}
-
-static void logScanDeferOnce(const char* why) {
-  static const char* last = nullptr;
-  if (last == why) {
-    return;
-  }
-  last = why;
-  Serial.printf("[wifi] scan deferred (%s)\n", why);
-}
-
-static void tryStartPendingScan() {
-  if (!gScanUiPending) {
-    return;
-  }
-
-  if (gWifi.isScanRunning() || gWifi.scanState() == WifiScanState::Running) {
-    if (gNetWork != NetWork::Scanning) {
-      Serial.println("[wifi] OLED adopted in-flight scan");
-    }
-    gNetWork = NetWork::Scanning;
-    return;
-  }
-
-  if (scanCacheFresh(WIFI_SCAN_CACHE_MS)) {
-    Serial.printf("[wifi] scan → UI from cache kept=%u\n",
-                  static_cast<unsigned>(gWifi.lastScan().size()));
-    notifyScanToUi(gWifi.lastScan(), true);
-    return;
-  }
-
-  if (gNetWork == NetWork::Probing || gWifi.isProbeRunning()) {
-    logScanDeferOnce("probe");
-    return;
-  }
-
-  // Do not abortJoin: kicking a live/soon-to-be-live STA makes OLED fail
-  // immediately, then SCAN_DONE arrives after GOT_IP from a later scan.
-  if (gNetWork == NetWork::Connecting || (gWifi.isConnecting() && !gWifi.isStaConnected())) {
-    logScanDeferOnce("STA joining");
-    return;
-  }
-
-  if (gWifi.startScan()) {
-    gNetWork = NetWork::Scanning;
-    return;
-  }
-
-  logScanDeferOnce("busy");
-}
-
+// Web /scan owns startScan. Harvest SCAN_DONE here so scanDelete() is not lost
+// if the browser stops polling.
 static void driveScan() {
-  if (gScanUiPending && gScanWaitStartMs != 0 &&
-      static_cast<int32_t>(millis() - gScanWaitStartMs) >=
-          static_cast<int32_t>(WIFI_SCAN_UI_TIMEOUT_MS)) {
-    if (!gWifi.lastScan().empty()) {
-      notifyScanToUi(gWifi.lastScan(), true);
-    } else if (!gWifi.isScanRunning()) {
-      failScanUi("timeout");
-    }
-  } else if (gScanUiPending && gNetWork != NetWork::Scanning && !gWifi.isScanRunning()) {
-    tryStartPendingScan();
-  }
-
-  const bool need = gNetWork == NetWork::Scanning || gWifi.isScanRunning() ||
-                    gWifi.peekScanDone() || gWifi.scanState() == WifiScanState::Running;
-  if (!need) {
-    return;
-  }
-  std::vector<WifiNetwork> nets;
-  const WifiScanState st = gWifi.pollScan(&nets);
-  if (st == WifiScanState::Running) {
-    return;
-  }
-  if (st == WifiScanState::Done || !gWifi.lastScan().empty()) {
-    notifyScanToUi(nets, true);
-    return;
-  }
-  // Failed/Idle with nothing to show: retry, do not fail before SCAN_DONE.
-  if (gScanUiPending) {
-    if (gNetWork == NetWork::Scanning) {
-      gNetWork = NetWork::Idle;
-    }
-    Serial.println("[wifi] scan empty/fail — retry");
-    tryStartPendingScan();
+  if (gWifi.isScanRunning() || gWifi.peekScanDone() ||
+      gWifi.scanState() == WifiScanState::Running) {
+    gWifi.pollScan(nullptr);
   }
 }
 
@@ -245,7 +115,6 @@ static void finishConnect(WifiConnectState st) {
     }
   }
   gStopApOnConnectOk = false;
-  tryStartPendingScan();
 }
 
 static void handleConnect(const char* ssid, const char* pass) {
@@ -267,18 +136,6 @@ static void handleNetRequest(const NetRequest& req) {
     case NetReqType::ConnectWifi:
       handleConnect(req.ssid, req.pass);
       break;
-    case NetReqType::ScanWifi: {
-      // Never ScanFailed here. Join-in-progress used to return "start fail"
-      // before SCAN_DONE, which is what the OLED showed.
-      gScanUiPending = true;
-      gScanUiSeq = req.seq != 0 ? req.seq : (gScanUiSeq + 1);
-      if (gScanUiSeq == 0) {
-        gScanUiSeq = 1;
-      }
-      gScanWaitStartMs = millis();
-      tryStartPendingScan();
-      break;
-    }
     case NetReqType::ApplyStaticIp: {
       if (!settingsLock(pdMS_TO_TICKS(200))) {
         postUiText("Settings busy");
@@ -341,19 +198,18 @@ static void pollDisconnectAndReconnect() {
     gIpc.setupAp = false;
     gBootNeedApIfFail = false;
     Serial.printf("STA IP (healed): %s\n", gWifi.localIp().toString().c_str());
-    tryStartPendingScan();
   }
 
   // Connecting owns DISC via pollConnect; elsewhere consume link-loss edges.
   // STA scan hops channels and often posts a transient DISC — do not steal the OLED.
-  if (gNetWork != NetWork::Connecting && gNetWork != NetWork::Scanning) {
+  if (gNetWork != NetWork::Connecting && !gWifi.isScanRunning()) {
     uint16_t discReason = 0;
     if (gWifi.consumeDisconnect(&discReason)) {
       char buf[40];
       snprintf(buf, sizeof(buf), "WiFi lost (%u)", discReason);
       postUiText(buf);
     }
-  } else if (gNetWork == NetWork::Scanning) {
+  } else if (gWifi.isScanRunning()) {
     gWifi.consumeDisconnect(nullptr);
   }
 
@@ -410,7 +266,6 @@ static void pollNetWork() {
       }
       break;
     }
-    case NetWork::Scanning:
     case NetWork::Idle:
     default:
       break;

@@ -5,7 +5,6 @@
 #include <WiFi.h>
 
 static const char* MENU_LABELS[] = {
-    "WiFi Scan",
     "Web Setup",
     "Set Static IP",
     "Use DHCP",
@@ -16,9 +15,6 @@ static const char* MENU_LABELS[] = {
     "NTP Stats",
     "Restart",
 };
-
-static const char PWD_CHARS[] =
-    "<ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%&*-_.";
 
 void DisplayUi::begin() {
   Wire.begin(PIN_OLED_SDA, PIN_OLED_SCL);
@@ -43,15 +39,6 @@ void DisplayUi::showMessage(const String& msg) {
   mode_ = UiMode::Message;
 }
 
-void DisplayUi::onScanResults(const std::vector<WifiNetwork>& nets) {
-  networks_ = nets;
-  wifiIndex_ = 0;
-  scanPending_ = false;
-  scanError_ = nets.empty() ? String("No APs") : String();
-  mode_ = UiMode::WifiScan;
-  messageUntil_ = 0;
-}
-
 void DisplayUi::drainUiMessages() {
   if (!gIpc.uiMsg) {
     return;
@@ -59,53 +46,13 @@ void DisplayUi::drainUiMessages() {
   UiMsg msg;
   while (xQueueReceive(gIpc.uiMsg, &msg, 0) == pdTRUE) {
     if (msg.type == UiMsgType::Text) {
-      // Stay on the scan/password screens; STA scan often emits "WiFi lost"/"OK IP".
-      if (mode_ != UiMode::WifiScan && mode_ != UiMode::WifiPassword && !scanPending_) {
-        showMessage(String(msg.text));
-      }
-    } else if (msg.type == UiMsgType::ScanResult) {
-      if (msg.seq != 0 && msg.seq != scanSeq_) {
-        continue;
-      }
-      if (xSemaphoreTake(gIpc.scanMutex, pdMS_TO_TICKS(80)) == pdTRUE) {
-        onScanResults(gIpc.scanResults);
-        gIpc.scanReady = false;
-        xSemaphoreGive(gIpc.scanMutex);
-      } else if (gIpc.scanReady) {
-        scanPending_ = false;
-        scanError_ = "list busy";
-        mode_ = UiMode::WifiScan;
-      }
-    } else if (msg.type == UiMsgType::ScanFailed) {
-      // Ignore leftover "start fail" from a previous request, or a fail
-      // that raced ahead of SCAN_DONE for this generation.
-      if (msg.seq != 0 && msg.seq != scanSeq_) {
-        continue;
-      }
-      scanPending_ = false;
-      scanError_ = msg.text[0] ? String(msg.text) : String("Scan failed");
-      mode_ = UiMode::WifiScan;
+      showMessage(String(msg.text));
     }
   }
 }
 
 void DisplayUi::loop(EncoderInput& enc, GpsService& gps, WifiManager& wifi, NtpServer& ntp) {
   drainUiMessages();
-  if (scanPending_ && scanStartedMs_ != 0 &&
-      static_cast<int32_t>(millis() - scanStartedMs_) >=
-          static_cast<int32_t>(WIFI_SCAN_UI_TIMEOUT_MS)) {
-    scanPending_ = false;
-    if (networks_.empty() && !scanError_.length()) {
-      scanError_ = "timeout";
-    }
-  }
-  if (scanPending_ && gIpc.scanReady) {
-    if (xSemaphoreTake(gIpc.scanMutex, pdMS_TO_TICKS(20)) == pdTRUE) {
-      onScanResults(gIpc.scanResults);
-      gIpc.scanReady = false;
-      xSemaphoreGive(gIpc.scanMutex);
-    }
-  }
 
   int8_t rot = enc.consumeRotate();
   bool click = enc.consumeClick();
@@ -117,12 +64,6 @@ void DisplayUi::loop(EncoderInput& enc, GpsService& gps, WifiManager& wifi, NtpS
       break;
     case UiMode::Menu:
       handleMenu(rot, click, longPress);
-      break;
-    case UiMode::WifiScan:
-      handleWifiScan(rot, click, longPress);
-      break;
-    case UiMode::WifiPassword:
-      handlePassword(rot, click, longPress);
       break;
     case UiMode::SetIp:
       handleSetIp(rot, click, longPress);
@@ -176,12 +117,6 @@ void DisplayUi::loop(EncoderInput& enc, GpsService& gps, WifiManager& wifi, NtpS
       break;
     case UiMode::Menu:
       drawMenu();
-      break;
-    case UiMode::WifiScan:
-      drawWifiScan();
-      break;
-    case UiMode::WifiPassword:
-      drawPassword();
       break;
     case UiMode::SetIp:
       drawSetIp();
@@ -336,79 +271,6 @@ void DisplayUi::drawMenu() {
     display_.print(i == menuIndex_ ? ">" : " ");
     display_.print(MENU_LABELS[i]);
   }
-}
-
-void DisplayUi::drawWifiScan() {
-  display_.setCursor(0, 0);
-  display_.println("WiFi list click=OK");
-  if (scanPending_) {
-    display_.setCursor(0, 20);
-    display_.println("Scanning...");
-    display_.setCursor(0, 40);
-    display_.println("long=back");
-    return;
-  }
-  if (networks_.empty()) {
-    display_.setCursor(0, 20);
-    if (scanError_.length()) {
-      display_.println(scanError_);
-    } else {
-      display_.println("No APs");
-    }
-    display_.setCursor(0, 40);
-    display_.println("click=retry");
-    return;
-  }
-  const int visible = 4;
-  int start = max(0, static_cast<int>(wifiIndex_) - visible + 1);
-  for (int row = 0; row < visible; ++row) {
-    int idx = start + row;
-    if (idx >= static_cast<int>(networks_.size())) {
-      break;
-    }
-    display_.setCursor(0, 12 + row * 12);
-    display_.print(idx == wifiIndex_ ? ">" : " ");
-    String line = networks_[idx].ssid;
-    bool ascii = true;
-    for (size_t k = 0; k < line.length(); ++k) {
-      const uint8_t c = static_cast<uint8_t>(line[k]);
-      if (c < 32 || c > 126) {
-        ascii = false;
-        break;
-      }
-    }
-    if (!ascii) {
-      char hex[20];
-      snprintf(hex, sizeof(hex), "AP %ddBm", static_cast<int>(networks_[idx].rssi));
-      line = hex;
-    } else if (line.length() > 16) {
-      line = line.substring(0, 16);
-    }
-    display_.print(line);
-  }
-}
-
-void DisplayUi::drawPassword() {
-  display_.setCursor(0, 0);
-  display_.println("Password");
-  display_.setCursor(0, 12);
-  display_.print("SSID:");
-  String s = pendingSsid_;
-  if (s.length() > 14) {
-    s = s.substring(0, 14);
-  }
-  display_.println(s);
-
-  display_.setCursor(0, 28);
-  display_.print("PWD:");
-  display_.println(password_);
-
-  display_.setCursor(0, 44);
-  display_.print("Char:[");
-  display_.print(PWD_CHARS[pwdCursor_]);
-  display_.print("] rot=chg");
-  display_.setCursor(0, 56);
-  display_.print("click=add long=OK");
 }
 
 void DisplayUi::drawSetIp() {
@@ -567,13 +429,6 @@ void DisplayUi::handleMenu(int8_t rot, bool click, bool longPress) {
     return;
   }
   switch (static_cast<MenuItem>(menuIndex_)) {
-    case MenuItem::WifiScan:
-      networks_.clear();
-      wifiIndex_ = 0;
-      scanError_ = "";
-      mode_ = UiMode::WifiScan;
-      requestWifiScan();
-      break;
     case MenuItem::WebSetup: {
       NetRequest req;
       req.type = NetReqType::StartWebSetup;
@@ -629,79 +484,6 @@ void DisplayUi::handleMenu(int8_t rot, bool click, bool longPress) {
       break;
     default:
       break;
-  }
-}
-
-void DisplayUi::requestWifiScan() {
-  NetRequest req;
-  req.type = NetReqType::ScanWifi;
-  scanSeq_++;
-  if (scanSeq_ == 0) {
-    scanSeq_ = 1;
-  }
-  req.seq = scanSeq_;
-  if (postNetRequest(req)) {
-    scanPending_ = true;
-    scanError_ = "";
-    scanStartedMs_ = millis();
-    networks_.clear();
-  } else if (!scanPending_) {
-    scanError_ = "Scan busy";
-  }
-}
-
-void DisplayUi::handleWifiScan(int8_t rot, bool click, bool longPress) {
-  if (longPress) {
-    scanPending_ = false;
-    mode_ = UiMode::Menu;
-    return;
-  }
-  if (scanPending_) {
-    return;
-  }
-  if (networks_.empty()) {
-    if (click) {
-      requestWifiScan();
-    }
-    return;
-  }
-  if (rot > 0 && wifiIndex_ + 1 < networks_.size()) {
-    wifiIndex_++;
-  } else if (rot < 0 && wifiIndex_ > 0) {
-    wifiIndex_--;
-  }
-  if (click && !networks_.empty()) {
-    pendingSsid_ = networks_[wifiIndex_].ssid;
-    password_ = "";
-    pwdCursor_ = 0;
-    mode_ = UiMode::WifiPassword;
-  }
-}
-
-void DisplayUi::handlePassword(int8_t rot, bool click, bool longPress) {
-  size_t n = sizeof(PWD_CHARS) - 1;
-  if (rot > 0) {
-    pwdCursor_ = (pwdCursor_ + 1) % n;
-  } else if (rot < 0) {
-    pwdCursor_ = (pwdCursor_ + n - 1) % n;
-  }
-  if (click) {
-    char c = PWD_CHARS[pwdCursor_];
-    if (c == '<') {
-      if (!password_.isEmpty()) {
-        password_.remove(password_.length() - 1);
-      }
-    } else if (password_.length() < 63) {
-      password_ += c;
-    }
-  }
-  if (longPress) {
-    NetRequest req;
-    req.type = NetReqType::ConnectWifi;
-    strncpy(req.ssid, pendingSsid_.c_str(), sizeof(req.ssid) - 1);
-    strncpy(req.pass, password_.c_str(), sizeof(req.pass) - 1);
-    postNetRequest(req);
-    showMessage("Connecting...");
   }
 }
 

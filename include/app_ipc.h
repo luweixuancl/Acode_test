@@ -2,18 +2,15 @@
 
 #include <Arduino.h>
 #include <IPAddress.h>
-#include <vector>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include <freertos/semphr.h>
 #include "settings.h"
-#include "wifi_manager.h"
 
 // Cross-task IPC for RTOS refactor (time / net / ui).
 
 enum class NetReqType : uint8_t {
   ConnectWifi,
-  ScanWifi,
   ApplyStaticIp,
   UseDhcp,
   StartWebSetup,
@@ -24,29 +21,21 @@ struct NetRequest {
   char ssid[33] = {};
   char pass[65] = {};
   IPAddress staticIp;
-  uint32_t seq = 0;  // OLED scan generation; 0 = unspecified
 };
 
 enum class UiMsgType : uint8_t {
   Text,
-  ScanResult,
-  ScanFailed,
 };
 
 struct UiMsg {
   UiMsgType type = UiMsgType::Text;
   char text[48] = {};
-  uint32_t seq = 0;  // must match DisplayUi scanSeq_ for ScanResult/ScanFailed
-  // Scan results: payload lives in shared scan buffer guarded by scanMutex.
 };
 
 struct AppIpc {
   QueueHandle_t netReq = nullptr;
   QueueHandle_t uiMsg = nullptr;
   SemaphoreHandle_t settingsMutex = nullptr;
-  SemaphoreHandle_t scanMutex = nullptr;
-  std::vector<WifiNetwork> scanResults;
-  bool scanReady = false;
   bool setupAp = false;
 
   // Task liveness stamps (millis); StatusLeds panics if any go stale.
