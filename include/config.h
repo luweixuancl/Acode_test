@@ -60,9 +60,13 @@
 
 // UI / timing
 #define DISPLAY_REFRESH_MS   250
-// Menu / scan list: 3 = 18×24 glyphs, 3 rows on 64px. Home clock stays size 2.
-#define OLED_MENU_TEXT_SIZE    3
-#define OLED_UI_MARK        "UI2"
+// Menu: size 2 (12×16, one step up from original 6×8). Pitch leaves a gap
+// between invert bars so rows do not touch.
+#define OLED_MENU_TEXT_SIZE    2
+#define OLED_MENU_ROWS         3
+#define OLED_MENU_ROW_H       22  // 16px glyph + 6px gap
+#define OLED_MENU_Y0           2
+#define OLED_UI_MARK        "M2"
 #define WIFI_CONNECT_TIMEOUT_MS 20000
 #define WIFI_NO_AP_REBEGIN_MS    3000  // re-WiFi.begin while Connecting after reason 201
 // Ignore local ASSOC_LEAVE (8) etc. right after our own disconnect()+begin().

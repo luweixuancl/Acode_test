@@ -4,17 +4,17 @@
 #include <Wire.h>
 #include <WiFi.h>
 
-// Size 3 = 18×24; 7 glyphs fit on 128px. Invert bar marks the selection.
+// Size 2 = 12×16; 10 glyphs fit on 128px. Invert bar marks the selection.
 static const char* MENU_LABELS[] = {
-    "WiFi",
-    "Web",
-    "IP",
-    "DHCP",
-    "TZ",
+    "WiFi Scan",
+    "Web Setup",
+    "Static IP",
+    "Use DHCP",
+    "Timezone",
     "Anomaly",
-    "ACL",
-    "Temp",
-    "NTP",
+    "NTP ACL",
+    "Temp Comp",
+    "NTP Stats",
     "Restart",
 };
 
@@ -32,16 +32,14 @@ void DisplayUi::begin() {
   display_.setTextWrap(false);
   display_.clearDisplay();
   display_.setTextColor(SH110X_WHITE);
-  display_.setTextSize(2);
-  display_.setCursor(8, 8);
-  display_.print("NTP ");
-  display_.print(OLED_UI_MARK);
   display_.setTextSize(1);
-  display_.setCursor(8, 40);
-  display_.print("Booting...");
+  display_.setCursor(0, 0);
+  display_.println("ESP32-C3 NTP");
+  display_.println("Booting...");
   display_.display();
-  Serial.printf("[ui] OLED menu size=%u mark=%s\n",
-                static_cast<unsigned>(OLED_MENU_TEXT_SIZE), OLED_UI_MARK);
+  Serial.printf("[ui] OLED menu size=%u rowH=%u mark=%s\n",
+                static_cast<unsigned>(OLED_MENU_TEXT_SIZE),
+                static_cast<unsigned>(OLED_MENU_ROW_H), OLED_UI_MARK);
 }
 
 void DisplayUi::showMessage(const String& msg) {
@@ -328,8 +326,7 @@ void DisplayUi::drawHome(const GpsStatus& st, const WifiManager& wifi, const App
 
 void DisplayUi::drawMenu() {
   const uint8_t count = static_cast<uint8_t>(MenuItem::Count);
-  const uint8_t visible = 3;
-  const uint8_t rowH = 21;
+  const uint8_t visible = OLED_MENU_ROWS;
   uint8_t start = 0;
   if (menuIndex_ >= visible) {
     start = menuIndex_ - visible + 1;
@@ -340,15 +337,15 @@ void DisplayUi::drawMenu() {
     if (i >= count) {
       break;
     }
-    const int16_t y = static_cast<int16_t>(1 + row * rowH);
+    const int16_t y = static_cast<int16_t>(OLED_MENU_Y0 + row * OLED_MENU_ROW_H);
     const bool sel = (i == menuIndex_);
     if (sel) {
-      display_.fillRect(0, y, 128, 20, SH110X_WHITE);
+      display_.fillRect(0, y, 128, 16, SH110X_WHITE);
       display_.setTextColor(SH110X_BLACK, SH110X_WHITE);
     } else {
       display_.setTextColor(SH110X_WHITE);
     }
-    display_.setCursor(2, y + 1);
+    display_.setCursor(2, y);
     display_.print(MENU_LABELS[i]);
   }
   display_.setTextSize(1);
@@ -358,23 +355,23 @@ void DisplayUi::drawMenu() {
 void DisplayUi::drawWifiScan() {
   if (scanPending_) {
     display_.setTextSize(OLED_MENU_TEXT_SIZE);
-    display_.setCursor(2, 20);
-    display_.print("Scan");
+    display_.setCursor(4, 16);
+    display_.print("Scanning");
     display_.setTextSize(1);
-    display_.setCursor(2, 52);
+    display_.setCursor(4, 52);
     display_.print("long=back");
     return;
   }
   if (networks_.empty()) {
     display_.setTextSize(OLED_MENU_TEXT_SIZE);
-    display_.setCursor(2, 12);
+    display_.setCursor(4, 16);
     display_.print("No APs");
     display_.setTextSize(1);
-    display_.setCursor(2, 52);
+    display_.setCursor(4, 52);
     display_.print("click=retry");
     return;
   }
-  const int visible = 3;
+  const int visible = OLED_MENU_ROWS;
   int start = max(0, static_cast<int>(wifiIndex_) - visible + 1);
   display_.setTextSize(OLED_MENU_TEXT_SIZE);
   for (int row = 0; row < visible; ++row) {
@@ -382,10 +379,10 @@ void DisplayUi::drawWifiScan() {
     if (idx >= static_cast<int>(networks_.size())) {
       break;
     }
-    const int16_t y = static_cast<int16_t>(1 + row * 21);
+    const int16_t y = static_cast<int16_t>(OLED_MENU_Y0 + row * OLED_MENU_ROW_H);
     const bool sel = (idx == static_cast<int>(wifiIndex_));
     if (sel) {
-      display_.fillRect(0, y, 128, 20, SH110X_WHITE);
+      display_.fillRect(0, y, 128, 16, SH110X_WHITE);
       display_.setTextColor(SH110X_BLACK, SH110X_WHITE);
     } else {
       display_.setTextColor(SH110X_WHITE);
@@ -400,13 +397,13 @@ void DisplayUi::drawWifiScan() {
       }
     }
     if (!ascii) {
-      char hex[8];
-      snprintf(hex, sizeof(hex), "%ddBm", static_cast<int>(networks_[idx].rssi));
+      char hex[12];
+      snprintf(hex, sizeof(hex), "AP %ddBm", static_cast<int>(networks_[idx].rssi));
       line = hex;
-    } else if (line.length() > 7) {
-      line = line.substring(0, 7);
+    } else if (line.length() > 10) {
+      line = line.substring(0, 10);
     }
-    display_.setCursor(2, y + 1);
+    display_.setCursor(2, y);
     display_.print(line);
   }
   display_.setTextSize(1);
