@@ -293,6 +293,9 @@ static void handleNetRequest(const NetRequest& req) {
       } else if (!gWifi.isStaConnected()) {
         // No live STA to ARP-probe against; just try connect with static config.
         startStaConnect(copy, false);
+      } else if (gWifi.localIp() == copy.staticIp) {
+        // Current IP already is the requested static IP — keep the live link.
+        postUiText("IP unchanged");
       } else if (!gWifi.beginConflictProbe(copy.staticIp)) {
         postUiText("Probe failed");
       } else {
