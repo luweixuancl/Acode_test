@@ -4,6 +4,7 @@
 #include <Wire.h>
 #include <WiFi.h>
 #include <Fonts/FreeMono9pt7b.h>
+#include <Fonts/FreeMonoBold12pt7b.h>
 
 // FreeMono 9pt. Menu / large single-line values only.
 // Dense 6-line pages stay on the built-in 6×8 so they do not pack.
@@ -50,6 +51,44 @@ static void monoLine(Adafruit_SH1107& d, int16_t top, const char* text, bool cen
   d.setCursor(x < 0 ? 0 : x, top + OLED_MENU_BASELINE);
   d.print(text);
   menuFontEnd(d);
+}
+
+// Home clock: FreeMono Bold 12pt (digit 10×15, advance 14 → HH:MM:SS ≈ 112 px).
+static constexpr int16_t kClockBaseline = 16;
+
+static void clockLine(Adafruit_SH1107& d, int16_t top, const char* text) {
+  d.setFont(&FreeMonoBold12pt7b);
+  d.setTextSize(1);
+  d.setTextWrap(false);
+  d.setTextColor(SH110X_WHITE);
+  const uint16_t w = monoWidth(d, text);
+  const int16_t x = static_cast<int16_t>((128 - w) / 2);
+  d.setCursor(x < 0 ? 0 : x, top + kClockBaseline);
+  d.print(text);
+  d.setFont(nullptr);
+  d.setTextSize(1);
+}
+
+static constexpr int16_t kWifiIconW = 13;
+
+static void drawWifiGlyph(Adafruit_SH1107& d, int16_t x, int16_t y) {
+  static const char* kRows[8] = {
+      "..#######....",
+      ".#.......#...",
+      "...#####.....",
+      "..#.....#....",
+      "....###......",
+      "...#...#.....",
+      ".....#.......",
+      "....###......",
+  };
+  for (int16_t r = 0; r < 8; ++r) {
+    for (int16_t c = 0; kRows[r][c]; ++c) {
+      if (kRows[r][c] == '#') {
+        d.drawPixel(x + c, y + r, SH110X_WHITE);
+      }
+    }
+  }
 }
 
 static void menuDrawRow(Adafruit_SH1107& d, int16_t y, bool sel, const char* text) {
@@ -268,11 +307,6 @@ void DisplayUi::drawHome(const GpsStatus& st, const WifiManager& wifi, const App
       0b00011000, 0b00111100, 0b01100110, 0b11011011,
       0b01100110, 0b00111100, 0b00011000, 0b00100100,
   };
-  static const uint8_t kIconWifi[] PROGMEM = {
-      0b00000000, 0b00111000, 0b01000100, 0b10000010,
-      0b00111000, 0b01000100, 0b00010000, 0b00010000,
-  };
-
   const bool sta = wifi.isStaConnected();
   const bool ap = gIpc.setupAp;
 
@@ -285,7 +319,6 @@ void DisplayUi::drawHome(const GpsStatus& st, const WifiManager& wifi, const App
            clockStateLabel(st.clockState));
   display_.print(left);
 
-  display_.drawBitmap(80, 0, kIconWifi, 8, 8, SH110X_WHITE);
   char right[14];
   if (sta) {
     snprintf(right, sizeof(right), "%d", static_cast<int>(WiFi.RSSI()));
@@ -297,6 +330,9 @@ void DisplayUi::drawHome(const GpsStatus& st, const WifiManager& wifi, const App
     snprintf(right, sizeof(right), "--");
   }
   const int16_t rightW = static_cast<int16_t>(strlen(right) * 6);
+  const int16_t gap = 2;
+  const int16_t iconX = 128 - rightW - gap - kWifiIconW;
+  drawWifiGlyph(display_, iconX, 0);
   display_.setCursor(128 - rightW, 0);
   display_.print(right);
 
@@ -313,7 +349,7 @@ void DisplayUi::drawHome(const GpsStatus& st, const WifiManager& wifi, const App
   } else {
     snprintf(timeBuf, sizeof(timeBuf), "--:--:--");
   }
-  monoLine(display_, 16, timeBuf, true);
+  clockLine(display_, 12, timeBuf);
 
   // --- SSID (secondary) ---
   display_.setTextSize(1);
@@ -561,13 +597,41 @@ void DisplayUi::drawNtpStats(const NtpServer& ntp) {
 }
 
 void DisplayUi::drawMessage() {
-  String line = message_;
-  menuFontBegin(display_);
-  while (line.length() > 1 && monoWidth(display_, line.c_str()) > 124) {
-    line.remove(line.length() - 1);
+  // "OK <ip>" — keep the full address (9pt "OK" + 6×8 IP).
+  if (message_.startsWith("OK ") && message_.length() > 3) {
+    monoLine(display_, 8, "OK", true);
+    const char* ip = message_.c_str() + 3;
+    const int16_t ipW = static_cast<int16_t>(strlen(ip) * 6);
+    display_.setCursor(ipW >= 128 ? 0 : (128 - ipW) / 2, 40);
+    display_.print(ip);
+    return;
   }
+
+  menuFontBegin(display_);
+  const uint16_t w = monoWidth(display_, message_.c_str());
   menuFontEnd(display_);
-  monoLine(display_, 22, line.c_str(), true);
+  if (w <= 124) {
+    monoLine(display_, 22, message_.c_str(), true);
+    return;
+  }
+
+  // Long toast: wrap 6×8 instead of chopping characters.
+  const uint8_t cpl = 21;
+  uint8_t row = 0;
+  const char* p = message_.c_str();
+  while (*p && row < 6) {
+    char line[22];
+    uint8_t n = 0;
+    while (p[n] && n < cpl) {
+      ++n;
+    }
+    memcpy(line, p, n);
+    line[n] = '\0';
+    display_.setCursor(0, 8 + row * 10);
+    display_.print(line);
+    p += n;
+    ++row;
+  }
 }
 
 void DisplayUi::drawWebHint() {
