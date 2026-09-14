@@ -216,7 +216,7 @@ uint16_t holdoverSec = 30;  // Refuse 时忽略；Short/Long 可覆盖预设
 3. ~~**LocalUtc**：锚定；Locked 时 `nowUtc` 切本地外推~~ ✅
 4. ~~**交叉检核状态机** + NTP/UI 字段~~ ✅
 5. ~~**按 `anomalyPolicy` 接 Holdover 分支~~ ✅
-6. **验收**：烧录 + 短监测回归已通过冒烟（LCK / LI=0 / stratum 1）；拔天线策略差异与 ≥10 min 回归仍待现场补测
+6. **验收**：烧录 + 短监测回归已通过冒烟（LCK / LI=0 / stratum 1）；**≥10 min vs 阿里云已通过两次**（2026-09-11 / 2026-09-14）。拔天线 Holdover/Refuse 差异仍待现场补测。综合评价见 [clock_eval_two_ntp_cmp.md](clock_eval_two_ntp_cmp.md)。
 
 冒烟（2026-09-11）：冷启约 90 s → `clk=LCK`、`residualMs=0`、`freqPpm≈-0.4`；8 轮 vs aliyun 中位差 ≈ +46 ms，无整秒跳变。
 ## 9. 验收标准
@@ -228,7 +228,7 @@ uint16_t holdoverSec = 30;  // Refuse 时忽略；Short/Long 可覆盖预设
 | HoldoverShort + 短暂遮挡 | 进入 Holdover，dispersion 上升，超时后 Unsynced |
 | HoldoverLong | 守时窗口明显长于 Short |
 | OLED/Web 改策略 | NVS 持久化，刷新/重启后保持；不需重编译 |
-| 回归 ≥10 min vs aliyun | \|diff\| &gt; 400 ms 仍为 ~0%；std 不明显恶化 |
+| 回归 ≥10 min vs aliyun | \|diff\| &gt; 400 ms 仍为 ~0%；std 不明显恶化。**已通过**（9/11：0/60；9/14 锁定后：0/52） |
 | 实时性 | ISR 仍极短；time 任务 1 ms 级轮询不变 |
 
 ## 10. 风险与注意
@@ -250,3 +250,4 @@ uint16_t holdoverSec = 30;  // Refuse 时忽略；Short/Long 可覆盖预设
 - 基线（修复前）：异常率 51.3%，整秒 stale −1 s → −3～−4 s（见 `ntp_test_report.md`）
 - RTOS + PPS-count 对齐后抽测：异常率 0%，配对差中位 ~48 ms
 - 本方案在「已消除整秒跳变」之上，增加 **GPS 健康可见性与可配置失效策略**，避免模块错秒时仍被客户端当作优质 stratum 1
+- 2026-09-13 伺服收紧（8 s 估频、Locked 5 ms 不跟 NMEA 重锚、诚实 INIT）后，2026-09-14 Termux 10 min 干净样本 stdev 1.34 ms，并拍到 ACQ→LCK；评价见 [clock_eval_two_ntp_cmp.md](clock_eval_two_ntp_cmp.md)

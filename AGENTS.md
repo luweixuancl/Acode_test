@@ -32,6 +32,7 @@ Client check after GPS lock + PPS: `ntpdate -q <device-ip>` — expect stratum 1
 | `docs/wifi_event_fsm.md` | WiFi 事件 FSM、重连、C3 无双核说明 |
 | `docs/ntp_cmp_test_20260911.md` | 10min NTP 比对：GPS vs 本机/阿里云（2026-09-11） |
 | `docs/ntp_cmp_test_20260914.md` | 10min NTP 比对：Termux vs 阿里云（2026-09-14，含 ACQ→LCK） |
+| `docs/clock_eval_two_ntp_cmp.md` | 两次比对 + LocalClock 优化后的算法评价 |
 
 Headers in `include/`, implementations in `src/`. One class per pair.
 
@@ -58,7 +59,7 @@ Do not hardcode pins in `.cpp`; use `config.h` macros.
 - Stability: PPS ISR queue drains multi-edges; task-net/ui on TWDT + LED-stale soft-restart; scan does not cancel STA reconnect; Holdover dispersion uses ppm×age; NVS `ver`/`crc` guards settings.
 - `WifiManager`: `WiFi.onEvent` only sets flags/logs; `task-net` consumes GOT_IP/DISC/SCAN_DONE. Connect success prefers GOT_IP (fallback WL_CONNECTED+IP). STA drop → backoff auto-reconnect (`WIFI_RECONNECT_*`, NVS `arec` default on); give-up opens SoftAP. Scan: AP-only SoftAP is raised to AP_STA first; encoder scan aborts an in-progress join. Results cached in `lastScan_` for OLED + `/scan`.
 - `task-net` polls STA connect / WiFi scan / ARP conflict without blocking; HTTP `handleClient` keeps running during join/scan.
-- Design: `docs/local_clock_gps_check.md`, `docs/wifi_event_fsm.md`, `docs/ntp_cmp_test_20260911.md`, `docs/ntp_cmp_test_20260914.md`.
+- Design: `docs/local_clock_gps_check.md`, `docs/wifi_event_fsm.md`, `docs/ntp_cmp_test_20260911.md`, `docs/ntp_cmp_test_20260914.md`, `docs/clock_eval_two_ntp_cmp.md`.
 - Product scope stops at Phase A+B (honest Stratum-1 + intranet hardening). **No Phase C**: NTS / HTTPS / PTP / TCXO / hardware timestamp — not worth it on ESP32-C3 + WiFi.
 - Windows note: project path with non-ASCII may break `ld` map file; build via ASCII junction (e.g. `C:\acode_leds`) if link fails.
 
