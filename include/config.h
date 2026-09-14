@@ -60,13 +60,14 @@
 
 // UI / timing
 #define DISPLAY_REFRESH_MS   250
-// Menu: built-in 6×8 (smaller than 12×16). 4 rows, 10px bar + 6px gap.
+// Menu: FreeSansBold 9pt (vector). 4 rows; bar shorter than pitch → gap.
 #define OLED_MENU_TEXT_SIZE    1
 #define OLED_MENU_ROWS         4
 #define OLED_MENU_ROW_H       16
-#define OLED_MENU_BAR_H       10
+#define OLED_MENU_BAR_H       13
+#define OLED_MENU_BASELINE    11  // GFX custom-font cursor is the baseline
 #define OLED_MENU_Y0           0
-#define OLED_UI_MARK        "S4"
+#define OLED_UI_MARK        "VF"
 #define WIFI_CONNECT_TIMEOUT_MS 20000
 #define WIFI_NO_AP_REBEGIN_MS    3000  // re-WiFi.begin while Connecting after reason 201
 // Ignore local ASSOC_LEAVE (8) etc. right after our own disconnect()+begin().

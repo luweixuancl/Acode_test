@@ -3,8 +3,9 @@
 #include "ntp_server.h"
 #include <Wire.h>
 #include <WiFi.h>
+#include <Fonts/FreeSansBold9pt7b.h>
 
-// Size 2 = 12×16; 10 glyphs fit on 128px. Invert bar marks the selection.
+// FreeSansBold 9pt ~12px caps; 10 glyphs usually fit on 128px.
 static const char* MENU_LABELS[] = {
     "WiFi Scan",
     "Web Setup",
@@ -20,6 +21,29 @@ static const char* MENU_LABELS[] = {
 
 static const char PWD_CHARS[] =
     "<ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%&*-_.";
+
+static void menuFontBegin(Adafruit_SH1107& d) {
+  d.setFont(&FreeSansBold9pt7b);
+  d.setTextSize(1);
+  d.setTextWrap(false);
+}
+
+static void menuFontEnd(Adafruit_SH1107& d) {
+  d.setFont(nullptr);
+  d.setTextSize(1);
+  d.setTextColor(SH110X_WHITE);
+}
+
+static void menuDrawRow(Adafruit_SH1107& d, int16_t y, bool sel, const char* text) {
+  if (sel) {
+    d.fillRect(0, y, 128, OLED_MENU_BAR_H, SH110X_WHITE);
+    d.setTextColor(SH110X_BLACK);
+  } else {
+    d.setTextColor(SH110X_WHITE);
+  }
+  d.setCursor(2, y + OLED_MENU_BASELINE);
+  d.print(text);
+}
 
 void DisplayUi::begin() {
   Wire.begin(PIN_OLED_SDA, PIN_OLED_SCL);
@@ -37,8 +61,8 @@ void DisplayUi::begin() {
   display_.println("ESP32-C3 NTP");
   display_.println("Booting...");
   display_.display();
-  Serial.printf("[ui] OLED menu size=%u rowH=%u mark=%s\n",
-                static_cast<unsigned>(OLED_MENU_TEXT_SIZE),
+  Serial.printf("[ui] OLED menu vector FreeSansBold9pt rows=%u rowH=%u mark=%s\n",
+                static_cast<unsigned>(OLED_MENU_ROWS),
                 static_cast<unsigned>(OLED_MENU_ROW_H), OLED_UI_MARK);
 }
 
@@ -331,62 +355,42 @@ void DisplayUi::drawMenu() {
   if (menuIndex_ >= visible) {
     start = menuIndex_ - visible + 1;
   }
-  display_.setTextSize(OLED_MENU_TEXT_SIZE);
+  menuFontBegin(display_);
   for (uint8_t row = 0; row < visible; ++row) {
     const uint8_t i = static_cast<uint8_t>(start + row);
     if (i >= count) {
       break;
     }
     const int16_t y = static_cast<int16_t>(OLED_MENU_Y0 + row * OLED_MENU_ROW_H);
-    const bool sel = (i == menuIndex_);
-    if (sel) {
-      display_.fillRect(0, y, 128, OLED_MENU_BAR_H, SH110X_WHITE);
-      display_.setTextColor(SH110X_BLACK, SH110X_WHITE);
-    } else {
-      display_.setTextColor(SH110X_WHITE);
-    }
-    display_.setCursor(2, y + 1);
-    display_.print(MENU_LABELS[i]);
+    menuDrawRow(display_, y, i == menuIndex_, MENU_LABELS[i]);
   }
-  display_.setTextSize(1);
-  display_.setTextColor(SH110X_WHITE);
+  menuFontEnd(display_);
 }
 
 void DisplayUi::drawWifiScan() {
+  menuFontBegin(display_);
   if (scanPending_) {
-    display_.setTextSize(OLED_MENU_TEXT_SIZE);
-    display_.setCursor(4, 16);
-    display_.print("Scanning");
-    display_.setTextSize(1);
-    display_.setCursor(4, 52);
+    menuDrawRow(display_, 16, false, "Scanning");
+    menuFontEnd(display_);
+    display_.setCursor(4, 56);
     display_.print("long=back");
     return;
   }
   if (networks_.empty()) {
-    display_.setTextSize(OLED_MENU_TEXT_SIZE);
-    display_.setCursor(4, 16);
-    display_.print("No APs");
-    display_.setTextSize(1);
-    display_.setCursor(4, 52);
+    menuDrawRow(display_, 16, false, "No APs");
+    menuFontEnd(display_);
+    display_.setCursor(4, 56);
     display_.print("click=retry");
     return;
   }
   const int visible = OLED_MENU_ROWS;
   int start = max(0, static_cast<int>(wifiIndex_) - visible + 1);
-  display_.setTextSize(OLED_MENU_TEXT_SIZE);
   for (int row = 0; row < visible; ++row) {
     int idx = start + row;
     if (idx >= static_cast<int>(networks_.size())) {
       break;
     }
     const int16_t y = static_cast<int16_t>(OLED_MENU_Y0 + row * OLED_MENU_ROW_H);
-    const bool sel = (idx == static_cast<int>(wifiIndex_));
-    if (sel) {
-      display_.fillRect(0, y, 128, OLED_MENU_BAR_H, SH110X_WHITE);
-      display_.setTextColor(SH110X_BLACK, SH110X_WHITE);
-    } else {
-      display_.setTextColor(SH110X_WHITE);
-    }
     String line = networks_[idx].ssid;
     bool ascii = true;
     for (size_t k = 0; k < line.length(); ++k) {
@@ -400,14 +404,19 @@ void DisplayUi::drawWifiScan() {
       char hex[12];
       snprintf(hex, sizeof(hex), "AP %ddBm", static_cast<int>(networks_[idx].rssi));
       line = hex;
-    } else if (line.length() > 20) {
-      line = line.substring(0, 20);
     }
-    display_.setCursor(2, y + 1);
-    display_.print(line);
+    int16_t x1 = 0, y1 = 0;
+    uint16_t tw = 0, th = 0;
+    while (line.length() > 1) {
+      display_.getTextBounds(line.c_str(), 0, 0, &x1, &y1, &tw, &th);
+      if (tw <= 124) {
+        break;
+      }
+      line.remove(line.length() - 1);
+    }
+    menuDrawRow(display_, y, idx == static_cast<int>(wifiIndex_), line.c_str());
   }
-  display_.setTextSize(1);
-  display_.setTextColor(SH110X_WHITE);
+  menuFontEnd(display_);
 }
 
 void DisplayUi::drawPassword() {
