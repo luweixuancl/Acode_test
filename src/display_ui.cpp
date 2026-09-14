@@ -4,8 +4,10 @@
 #include <Wire.h>
 #include <WiFi.h>
 #include <Fonts/FreeSans9pt7b.h>
+#include <Fonts/FreeSans12pt7b.h>
 
-// FreeSans 9pt ~12px caps; 10 glyphs usually fit on 128px.
+// FreeSans 9pt = former size-1; 12pt = former size-2. Never setTextSize(2)
+// on these fonts (that would be ~24px).
 static const char* MENU_LABELS[] = {
     "WiFi Scan",
     "Web Setup",
@@ -22,19 +24,36 @@ static const char* MENU_LABELS[] = {
 static const char PWD_CHARS[] =
     "<ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%&*-_.";
 
-static void menuFontBegin(Adafruit_SH1107& d) {
-  d.setFont(&FreeSans9pt7b);
+static void uiFont(Adafruit_SH1107& d, bool large) {
+  d.setFont(large ? &FreeSans12pt7b : &FreeSans9pt7b);
   d.setTextSize(1);
   d.setTextWrap(false);
-}
-
-static void menuFontEnd(Adafruit_SH1107& d) {
-  d.setFont(nullptr);
-  d.setTextSize(1);
   d.setTextColor(SH110X_WHITE);
 }
 
+static int16_t uiBaseline(int16_t top, bool large) {
+  return static_cast<int16_t>(top + (large ? 16 : OLED_MENU_BASELINE));
+}
+
+static void uiAt(Adafruit_SH1107& d, int16_t x, int16_t top, const char* text, bool large = false) {
+  uiFont(d, large);
+  d.setCursor(x, uiBaseline(top, large));
+  d.print(text);
+}
+
+static uint16_t uiTextWidth(Adafruit_SH1107& d, const char* text) {
+  int16_t x1 = 0, y1 = 0;
+  uint16_t w = 0, h = 0;
+  d.getTextBounds(text, 0, 0, &x1, &y1, &w, &h);
+  return w;
+}
+
+static void menuFontBegin(Adafruit_SH1107& d) { uiFont(d, false); }
+
+static void menuFontEnd(Adafruit_SH1107& d) { uiFont(d, false); }
+
 static void menuDrawRow(Adafruit_SH1107& d, int16_t y, bool sel, const char* text) {
+  uiFont(d, false);
   if (sel) {
     d.fillRect(0, y, 128, OLED_MENU_BAR_H, SH110X_WHITE);
     d.setTextColor(SH110X_BLACK);
@@ -55,13 +74,10 @@ void DisplayUi::begin() {
   display_.setRotation(OLED_ROTATION);
   display_.setTextWrap(false);
   display_.clearDisplay();
-  display_.setTextColor(SH110X_WHITE);
-  display_.setTextSize(1);
-  display_.setCursor(0, 0);
-  display_.println("ESP32-C3 NTP");
-  display_.println("Booting...");
+  uiAt(display_, 0, 4, "ESP32-C3 NTP");
+  uiAt(display_, 0, 24, "Booting...");
   display_.display();
-  Serial.printf("[ui] OLED menu vector FreeSans9pt rows=%u rowH=%u mark=%s\n",
+  Serial.printf("[ui] OLED FreeSans 9/12pt rows=%u rowH=%u mark=%s\n",
                 static_cast<unsigned>(OLED_MENU_ROWS),
                 static_cast<unsigned>(OLED_MENU_ROW_H), OLED_UI_MARK);
 }
@@ -198,8 +214,7 @@ void DisplayUi::loop(EncoderInput& enc, GpsService& gps, WifiManager& wifi, NtpS
 
   display_.clearDisplay();
   display_.setTextWrap(false);
-  display_.setTextSize(1);
-  display_.setTextColor(SH110X_WHITE);
+  uiFont(display_, false);
   switch (mode_) {
     case UiMode::Home:
       drawHome(st, wifi, settings);
@@ -242,9 +257,6 @@ void DisplayUi::loop(EncoderInput& enc, GpsService& gps, WifiManager& wifi, NtpS
 }
 
 void DisplayUi::drawHome(const GpsStatus& st, const WifiManager& wifi, const AppSettings& settings) {
-  // Scheme A (128×64): top status chips · large time · SSID · IP+SYNC
-  // Built-in font: size1 = 6×8, size2 = 12×16.
-
   static const uint8_t kIconSat[] PROGMEM = {
       0b00011000, 0b00111100, 0b01100110, 0b11011011,
       0b01100110, 0b00111100, 0b00011000, 0b00100100,
@@ -257,16 +269,15 @@ void DisplayUi::drawHome(const GpsStatus& st, const WifiManager& wifi, const App
   const bool sta = wifi.isStaConnected();
   const bool ap = gIpc.setupAp;
 
-  // --- Top bar (y=0..8) ---
-  display_.drawBitmap(0, 0, kIconSat, 8, 8, SH110X_WHITE);
-  display_.setTextSize(1);
-  display_.setCursor(10, 0);
+  uiFont(display_, false);
+  display_.drawBitmap(0, 2, kIconSat, 8, 8, SH110X_WHITE);
   char left[20];
   snprintf(left, sizeof(left), "%u %s", static_cast<unsigned>(st.satellites),
            clockStateLabel(st.clockState));
+  display_.setCursor(10, uiBaseline(2, false));
   display_.print(left);
 
-  display_.drawBitmap(80, 0, kIconWifi, 8, 8, SH110X_WHITE);
+  display_.drawBitmap(80, 2, kIconWifi, 8, 8, SH110X_WHITE);
   char right[14];
   if (sta) {
     snprintf(right, sizeof(right), "%d", static_cast<int>(WiFi.RSSI()));
@@ -277,14 +288,12 @@ void DisplayUi::drawHome(const GpsStatus& st, const WifiManager& wifi, const App
   } else {
     snprintf(right, sizeof(right), "--");
   }
-  const int16_t rightW = static_cast<int16_t>(strlen(right) * 6);
-  display_.setCursor(128 - rightW, 0);
+  display_.setCursor(128 - 2 - static_cast<int16_t>(uiTextWidth(display_, right)),
+                     uiBaseline(2, false));
   display_.print(right);
 
-  // Thin separator under status chips
-  display_.drawFastHLine(0, 10, 128, SH110X_WHITE);
+  display_.drawFastHLine(0, 16, 128, SH110X_WHITE);
 
-  // --- Large local time (primary) ---
   char timeBuf[9];
   if (st.utcEpoch > 0) {
     time_t local = static_cast<time_t>(st.utcEpoch) + settings.timezoneHours * 3600L;
@@ -294,13 +303,12 @@ void DisplayUi::drawHome(const GpsStatus& st, const WifiManager& wifi, const App
   } else {
     snprintf(timeBuf, sizeof(timeBuf), "--:--:--");
   }
-  display_.setTextSize(2);
-  // 8 glyphs × 12 px = 96; center on 128
-  display_.setCursor(16, 16);
+  uiFont(display_, true);
+  const uint16_t timeW = uiTextWidth(display_, timeBuf);
+  display_.setCursor(static_cast<int16_t>((128 - timeW) / 2), uiBaseline(18, true));
   display_.print(timeBuf);
 
-  // --- SSID (secondary) ---
-  display_.setTextSize(1);
+  uiFont(display_, false);
   String ssid;
   if (sta) {
     ssid = WiFi.SSID();
@@ -317,34 +325,26 @@ void DisplayUi::drawHome(const GpsStatus& st, const WifiManager& wifi, const App
   } else {
     ssid = "(no WiFi)";
   }
-  // Max ~21 chars at size1; keep 20 + NUL
-  char ssidLine[21];
-  const size_t n = ssid.length();
-  if (n <= 20) {
-    memcpy(ssidLine, ssid.c_str(), n);
-    ssidLine[n] = '\0';
-  } else {
-    memcpy(ssidLine, ssid.c_str(), 17);
-    ssidLine[17] = '.';
-    ssidLine[18] = '.';
-    ssidLine[19] = '.';
-    ssidLine[20] = '\0';
+  while (ssid.length() > 1 && uiTextWidth(display_, ssid.c_str()) > 128) {
+    ssid.remove(ssid.length() - 1);
   }
-  display_.setCursor(0, 38);
-  display_.print(ssidLine);
+  display_.setCursor(0, uiBaseline(40, false));
+  display_.print(ssid);
 
-  // --- IP + SYNC ---
-  display_.setCursor(0, 52);
+  String ip;
   if (sta) {
-    display_.print(wifi.localIp());
+    ip = wifi.localIp().toString();
   } else if (ap) {
-    display_.print(WiFi.softAPIP());
+    ip = WiFi.softAPIP().toString();
   } else {
-    display_.print("--.--.--.--");
+    ip = "--.--.--.--";
   }
+  display_.setCursor(0, uiBaseline(52, false));
+  display_.print(ip);
 
   const char* sync = st.timeValid ? "SYNC" : "WAIT";
-  display_.setCursor(128 - static_cast<int16_t>(strlen(sync) * 6), 52);
+  display_.setCursor(128 - 2 - static_cast<int16_t>(uiTextWidth(display_, sync)),
+                     uiBaseline(52, false));
   display_.print(sync);
 }
 
@@ -372,15 +372,13 @@ void DisplayUi::drawWifiScan() {
   if (scanPending_) {
     menuDrawRow(display_, 16, false, "Scanning");
     menuFontEnd(display_);
-    display_.setCursor(4, 56);
-    display_.print("long=back");
+    uiAt(display_, 4, 52, "long=back");
     return;
   }
   if (networks_.empty()) {
     menuDrawRow(display_, 16, false, "No APs");
     menuFontEnd(display_);
-    display_.setCursor(4, 56);
-    display_.print("click=retry");
+    uiAt(display_, 4, 52, "click=retry");
     return;
   }
   const int visible = OLED_MENU_ROWS;
@@ -420,160 +418,119 @@ void DisplayUi::drawWifiScan() {
 }
 
 void DisplayUi::drawPassword() {
-  display_.setCursor(0, 0);
-  display_.println("Password");
-  display_.setCursor(0, 12);
-  display_.print("SSID:");
+  uiAt(display_, 0, 0, "Password");
   String s = pendingSsid_;
-  if (s.length() > 14) {
-    s = s.substring(0, 14);
+  while (s.length() > 1 && uiTextWidth(display_, (String("SSID:") + s).c_str()) > 128) {
+    s.remove(s.length() - 1);
   }
-  display_.println(s);
-
-  display_.setCursor(0, 28);
-  display_.print("PWD:");
-  display_.println(password_);
-
-  display_.setCursor(0, 44);
-  display_.print("Char:[");
-  display_.print(PWD_CHARS[pwdCursor_]);
-  display_.print("] rot=chg");
-  display_.setCursor(0, 56);
-  display_.print("click=add long=OK");
+  uiAt(display_, 0, 14, (String("SSID:") + s).c_str());
+  String pwd = password_;
+  while (pwd.length() > 1 && uiTextWidth(display_, (String("PWD:") + pwd).c_str()) > 128) {
+    pwd.remove(0, 1);
+  }
+  uiAt(display_, 0, 28, (String("PWD:") + pwd).c_str());
+  char chLine[20];
+  snprintf(chLine, sizeof(chLine), "Char:[%c] rot", PWD_CHARS[pwdCursor_]);
+  uiAt(display_, 0, 42, chLine);
+  uiAt(display_, 0, 54, "click=add long=OK");
 }
 
 void DisplayUi::drawSetIp() {
-  display_.setCursor(0, 0);
-  display_.println("Static IP edit");
+  uiAt(display_, 0, 0, "Static IP");
+  uiFont(display_, false);
   for (uint8_t i = 0; i < 4; ++i) {
-    display_.setCursor(i * 32, 24);
-    if (i == ipOctet_) {
-      display_.print('[');
+    const int16_t x = static_cast<int16_t>(i * 32);
+    const bool sel = (i == ipOctet_);
+    if (sel) {
+      display_.fillRect(x, 20, 31, 16, SH110X_WHITE);
+      display_.setTextColor(SH110X_BLACK);
+    } else {
+      display_.setTextColor(SH110X_WHITE);
     }
-    display_.print(editIp_[i]);
-    if (i == ipOctet_) {
-      display_.print(']');
-    }
-    if (i < 3) {
-      display_.setCursor(i * 32 + 26, 24);
-      display_.print('.');
-    }
+    char oct[5];
+    snprintf(oct, sizeof(oct), "%u", static_cast<unsigned>(editIp_[i]));
+    display_.setCursor(x + 2, uiBaseline(22, false));
+    display_.print(oct);
   }
-  display_.setCursor(0, 48);
-  display_.print("rot=val click=next");
-  display_.setCursor(0, 56);
-  display_.print("long=save+check");
+  uiAt(display_, 0, 40, "rot=val click=next");
+  uiAt(display_, 0, 52, "long=save");
 }
 
 void DisplayUi::drawTimezone(const AppSettings& settings) {
-  display_.setCursor(0, 0);
-  display_.println("Timezone");
-  display_.setTextSize(2);
-  display_.setCursor(16, 20);
-  display_.print("UTC");
-  if (settings.timezoneHours >= 0) {
-    display_.print("+");
-  }
-  display_.print(settings.timezoneHours);
-  display_.setTextSize(1);
-  display_.setCursor(0, 48);
-  display_.print("rot=chg click=save");
+  uiAt(display_, 0, 0, "Timezone");
+  char off[12];
+  snprintf(off, sizeof(off), "UTC%s%d", settings.timezoneHours >= 0 ? "+" : "",
+           static_cast<int>(settings.timezoneHours));
+  uiFont(display_, true);
+  const uint16_t w = uiTextWidth(display_, off);
+  display_.setCursor(static_cast<int16_t>((128 - w) / 2), uiBaseline(20, true));
+  display_.print(off);
+  uiAt(display_, 0, 50, "rot=chg click=save");
 }
 
 void DisplayUi::drawAnomaly(const AppSettings& settings) {
   (void)settings;
-  display_.setCursor(0, 0);
-  display_.println("Anomaly");
-  display_.setTextSize(2);
-  display_.setCursor(0, 16);
-  display_.print(">");
-  display_.println(anomalyPolicyMenuLabel(editPolicy_));
-  display_.setTextSize(1);
-  display_.setCursor(0, 40);
-  display_.println("rot=chg click=save");
-  display_.setCursor(0, 52);
-  display_.println("long=back");
+  uiAt(display_, 0, 0, "Anomaly");
+  char line[20];
+  snprintf(line, sizeof(line), ">%s", anomalyPolicyMenuLabel(editPolicy_));
+  uiAt(display_, 0, 18, line, true);
+  uiAt(display_, 0, 40, "rot=chg click=save");
+  uiAt(display_, 0, 52, "long=back");
 }
 
 void DisplayUi::drawTempComp(const AppSettings& settings) {
-  display_.setCursor(0, 0);
-  display_.println("Temp Comp");
-  display_.setTextSize(2);
-  display_.setCursor(0, 14);
-  display_.print(">");
-  display_.println(editTempComp_ ? "On" : "Off");
-  display_.setTextSize(1);
-  display_.setCursor(0, 32);
-  display_.print("k=");
-  display_.print(tempCoeffPpmPerC(settings.tempCoeffCenti), 2);
-  display_.println(" ppm/C");
-  display_.setCursor(0, 44);
-  display_.println("coeff via Web");
-  display_.setCursor(0, 56);
-  display_.println("rot=on/off save");
+  uiAt(display_, 0, 0, "Temp Comp");
+  uiAt(display_, 0, 16, editTempComp_ ? ">On" : ">Off", true);
+  char kline[24];
+  snprintf(kline, sizeof(kline), "k=%.2f ppm/C",
+           static_cast<double>(tempCoeffPpmPerC(settings.tempCoeffCenti)));
+  uiAt(display_, 0, 36, kline);
+  uiAt(display_, 0, 52, "rot=on/off save");
 }
 
 void DisplayUi::drawAcl(const AppSettings& settings) {
   (void)settings;
-  display_.setCursor(0, 0);
-  display_.println("NTP ACL");
-  display_.setTextSize(2);
-  display_.setCursor(0, 14);
-  display_.print(">");
-  display_.println(ntpAclModeMenuLabel(editAclMode_));
-  display_.setTextSize(1);
-  display_.setCursor(0, 32);
-  display_.print("IPs: ");
-  display_.print(editAclCount_);
-  display_.print("/");
-  display_.println(NTP_ACL_MAX_ENTRIES);
-  display_.setCursor(0, 44);
-  display_.println("edit list via Web");
-  display_.setCursor(0, 56);
-  display_.println("rot=mode click=save");
+  uiAt(display_, 0, 0, "NTP ACL");
+  char mode[20];
+  snprintf(mode, sizeof(mode), ">%s", ntpAclModeMenuLabel(editAclMode_));
+  uiAt(display_, 0, 16, mode, true);
+  char ips[16];
+  snprintf(ips, sizeof(ips), "IPs: %u/%u", static_cast<unsigned>(editAclCount_),
+           static_cast<unsigned>(NTP_ACL_MAX_ENTRIES));
+  uiAt(display_, 0, 36, ips);
+  uiAt(display_, 0, 52, "rot=mode save");
 }
 
 void DisplayUi::drawNtpStats(const NtpServer& ntp) {
-  display_.setCursor(0, 0);
-  display_.println("NTP Stats");
-  display_.setCursor(0, 12);
-  display_.print("served ");
-  display_.println(ntp.servedCount());
-  display_.setCursor(0, 22);
-  display_.print("RATE   ");
-  display_.println(ntp.rateLimitedCount());
-  display_.setCursor(0, 32);
-  display_.print("DENY   ");
-  display_.print(ntp.deniedCount());
-  display_.print(" ACL ");
-  display_.println(ntp.aclDeniedCount());
-  display_.setCursor(0, 42);
-  display_.print("drop   ");
-  display_.print(ntp.droppedCount());
-  display_.print(" c=");
-  display_.println(ntp.activeClientCount());
-  display_.setCursor(0, 56);
-  display_.print("click=back");
+  char line[28];
+  snprintf(line, sizeof(line), "served %lu", static_cast<unsigned long>(ntp.servedCount()));
+  uiAt(display_, 0, 0, line);
+  snprintf(line, sizeof(line), "RATE %lu", static_cast<unsigned long>(ntp.rateLimitedCount()));
+  uiAt(display_, 0, 12, line);
+  snprintf(line, sizeof(line), "DENY %lu ACL %lu",
+           static_cast<unsigned long>(ntp.deniedCount()),
+           static_cast<unsigned long>(ntp.aclDeniedCount()));
+  uiAt(display_, 0, 24, line);
+  snprintf(line, sizeof(line), "drop %lu c=%u", static_cast<unsigned long>(ntp.droppedCount()),
+           static_cast<unsigned>(ntp.activeClientCount()));
+  uiAt(display_, 0, 36, line);
+  uiAt(display_, 0, 52, "click=back");
 }
 
 void DisplayUi::drawMessage() {
-  display_.setTextSize(2);
   String line = message_;
-  if (line.length() > 10) {
-    line = line.substring(0, 10);
+  uiFont(display_, true);
+  while (line.length() > 1 && uiTextWidth(display_, line.c_str()) > 124) {
+    line.remove(line.length() - 1);
   }
-  display_.setCursor(4, 20);
-  display_.println(line);
-  display_.setTextSize(1);
+  const uint16_t w = uiTextWidth(display_, line.c_str());
+  display_.setCursor(static_cast<int16_t>((128 - w) / 2), uiBaseline(22, true));
+  display_.print(line);
 }
 
 void DisplayUi::drawWebHint() {
-  display_.setCursor(0, 0);
-  display_.println("Web WiFi Setup");
-  display_.setCursor(0, 16);
-  display_.println("Join AP NTP-Setup-*");
-  display_.setCursor(0, 28);
-  display_.print("Pass:");
+  uiAt(display_, 0, 0, "Web Setup");
+  uiAt(display_, 0, 14, "Join NTP-Setup-*");
   String apPass;
   if (settingsLock(pdMS_TO_TICKS(20))) {
     apPass = effectiveSoftApPassword(gSettings);
@@ -581,11 +538,9 @@ void DisplayUi::drawWebHint() {
   } else {
     apPass = derivedSoftApPassword();
   }
-  display_.println(apPass);
-  display_.setCursor(0, 40);
-  display_.println("then /setup login");
-  display_.setCursor(0, 52);
-  display_.print(WiFi.softAPIP());
+  uiAt(display_, 0, 28, (String("Pass:") + apPass).c_str());
+  uiAt(display_, 0, 42, "/setup login");
+  uiAt(display_, 0, 54, WiFi.softAPIP().toString().c_str());
 }
 
 void DisplayUi::handleHome(int8_t rot, bool click) {
