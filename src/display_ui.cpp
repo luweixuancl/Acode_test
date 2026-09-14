@@ -340,12 +340,12 @@ void DisplayUi::drawMenu() {
     const int16_t y = static_cast<int16_t>(OLED_MENU_Y0 + row * OLED_MENU_ROW_H);
     const bool sel = (i == menuIndex_);
     if (sel) {
-      display_.fillRect(0, y, 128, 16, SH110X_WHITE);
+      display_.fillRect(0, y, 128, OLED_MENU_BAR_H, SH110X_WHITE);
       display_.setTextColor(SH110X_BLACK, SH110X_WHITE);
     } else {
       display_.setTextColor(SH110X_WHITE);
     }
-    display_.setCursor(2, y);
+    display_.setCursor(2, y + 1);
     display_.print(MENU_LABELS[i]);
   }
   display_.setTextSize(1);
@@ -382,7 +382,7 @@ void DisplayUi::drawWifiScan() {
     const int16_t y = static_cast<int16_t>(OLED_MENU_Y0 + row * OLED_MENU_ROW_H);
     const bool sel = (idx == static_cast<int>(wifiIndex_));
     if (sel) {
-      display_.fillRect(0, y, 128, 16, SH110X_WHITE);
+      display_.fillRect(0, y, 128, OLED_MENU_BAR_H, SH110X_WHITE);
       display_.setTextColor(SH110X_BLACK, SH110X_WHITE);
     } else {
       display_.setTextColor(SH110X_WHITE);
@@ -400,10 +400,10 @@ void DisplayUi::drawWifiScan() {
       char hex[12];
       snprintf(hex, sizeof(hex), "AP %ddBm", static_cast<int>(networks_[idx].rssi));
       line = hex;
-    } else if (line.length() > 10) {
-      line = line.substring(0, 10);
+    } else if (line.length() > 20) {
+      line = line.substring(0, 20);
     }
-    display_.setCursor(2, y);
+    display_.setCursor(2, y + 1);
     display_.print(line);
   }
   display_.setTextSize(1);
