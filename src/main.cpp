@@ -45,6 +45,11 @@ static bool gStopApOnConnectOk = false;
 static bool gBootNeedApIfFail = true;
 static bool gConnectFromAutoReconnect = false;
 
+// Survives ESP.restart() (soft reset), zeroed on real power-on: latches the
+// factory reset so holding the switch through the auto-reboot cannot wipe
+// the (already default) config again. One reset per power-on cycle.
+RTC_DATA_ATTR static uint32_t gFactoryResetLatch = 0;
+
 static bool startStaConnect(const AppSettings& settings, bool stopApOnOk) {
   if (gWifi.isBusy() || gNetWork != NetWork::Idle) {
     postUiText("WiFi busy");
@@ -70,6 +75,7 @@ static void factoryResetNow() {
   gStore.save(def);
   Serial.println("[reset] config cleared - restarting");
   gUi.bootMessage("Config reset", "restarting...");
+  gFactoryResetLatch = 1;  // next boot must not re-wipe if SW still held
   delay(800);
   ESP.restart();
 }
@@ -77,6 +83,12 @@ static void factoryResetNow() {
 // Cold-boot escape hatch: hold the encoder switch through power-on; after
 // FACTORY_RESET_HOLD_MS every setting returns to defaults (new SoftAP flow).
 static void checkFactoryReset() {
+  const bool justReset = gFactoryResetLatch != 0;
+  gFactoryResetLatch = 0;
+  if (justReset) {
+    Serial.println("[reset] skip: factory reset already ran this power cycle");
+    return;
+  }
   if (digitalRead(PIN_ENC_SW) != LOW) {
     return;  // normal boot (pullup is set by gEnc.begin())
   }
