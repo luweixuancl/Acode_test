@@ -22,6 +22,7 @@ enum class UiMode : uint8_t {
   SetAnomaly,
   SetAcl,
   SetTempComp,
+  SetScreen,
   NtpStats,
   WebSetupHint,
   Message,
@@ -36,6 +37,7 @@ enum class MenuItem : uint8_t {
   AnomalyMode,
   NtpAcl,
   TempComp,
+  ScreenOff,
   NtpStats,
   Restart,
   Count
@@ -59,6 +61,7 @@ class DisplayUi {
   void drawAnomaly(const AppSettings& settings);
   void drawAcl(const AppSettings& settings);
   void drawTempComp(const AppSettings& settings);
+  void drawScreen();
   void drawNtpStats(const NtpServer& ntp);
   void drawMessage();
   void drawWebHint();
@@ -72,6 +75,7 @@ class DisplayUi {
   void handleAnomaly(int8_t rot, bool click, bool longPress);
   void handleAcl(int8_t rot, bool click, bool longPress);
   void handleTempComp(int8_t rot, bool click, bool longPress);
+  void handleScreen(int8_t rot, bool click, bool longPress);
   void handleNtpStats(int8_t rot, bool click, bool longPress);
   void drainUiMessages();
   void requestWifiScan();
@@ -95,10 +99,12 @@ class DisplayUi {
   NtpAclMode editAclMode_ = NtpAclMode::Off;
   uint8_t editAclCount_ = 0;
   bool editTempComp_ = false;
+  uint8_t editScreenIdx_ = kOledIdleDefaultIdx;
   String pendingSsid_;
   String message_;
   uint32_t messageUntil_ = 0;
   uint32_t lastDrawMs_ = 0;
   bool screenOff_ = false;
   uint32_t lastInputMs_ = 0;
+  uint32_t idleOffMs_ = OLED_IDLE_OFF_DEFAULT_MS;
 };

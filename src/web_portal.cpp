@@ -359,6 +359,7 @@ void WebPortal::handleSetup() {
   uint8_t aclm = 0;
   bool tcmp = false;
   int16_t tcpc = CLK_TEMP_COEFF_CENTI;
+  uint32_t ooffMin = OLED_IDLE_OFF_DEFAULT_MS / 60000;
   String aclLines;
   String savedSsid;
   bool haveSaved = false;
@@ -367,6 +368,7 @@ void WebPortal::handleSetup() {
     aclm = static_cast<uint8_t>(gSettings.ntpAclMode);
     tcmp = gSettings.tempComp;
     tcpc = gSettings.tempCoeffCenti;
+    ooffMin = gSettings.oledIdleOffMs / 60000;
     for (uint8_t i = 0; i < gSettings.ntpAclCount && i < NTP_ACL_MAX_ENTRIES; ++i) {
       if (i) {
         aclLines += '\n';
@@ -420,6 +422,18 @@ void WebPortal::handleSetup() {
             "<input id='tcpc' type='number' step='0.01'>"
             "<button type='button' onclick='saveTemp()'>保存温度补偿</button>"
             "<p id='tmsg'></p></div>");
+  body += F("<div class='card'><h2 style='font-size:1rem;margin:0 0 8px'>屏幕息屏</h2>"
+            "<p style='color:#64748b;font-size:.85rem'>无旋钮操作达到该时长后关闭 OLED 面板（防烧屏）。"
+            "旋转/单击旋钮唤醒，首个动作仅唤醒不导航；系统提示（OK IP 等）会自动亮屏。0 = 常亮。</p>"
+            "<label>息屏时间</label><select id='ooff'>"
+            "<option value='0'>常亮（不息屏）</option>"
+            "<option value='1'>1 分钟</option>"
+            "<option value='5'>5 分钟</option>"
+            "<option value='10'>10 分钟（默认）</option>"
+            "<option value='30'>30 分钟</option>"
+            "</select>"
+            "<button type='button' onclick='saveScreen()'>保存息屏</button>"
+            "<p id='smsg'></p></div>");
   body += F("<div class='card'><h2 style='font-size:1rem;margin:0 0 8px'>WiFi 配网</h2>"
             "<p>扫描热点，选择 SSID，输入密码后连接。</p>"
             "<button type='button' onclick='scan()'>扫描 WiFi</button>"
@@ -485,6 +499,12 @@ void WebPortal::handleSetup() {
             " document.getElementById('tmsg').textContent=await postSave({tempComp,tempCoeff});"
             " }catch(e){document.getElementById('tmsg').textContent=String(e);}"
             "}"
+            "async function saveScreen(){"
+            " try{"
+            " const oledIdleMin=parseInt(document.getElementById('ooff').value,10);"
+            " document.getElementById('smsg').textContent=await postSave({oledIdleMin});"
+            " }catch(e){document.getElementById('smsg').textContent=String(e);}"
+            "}"
             "document.getElementById('apol').value='");
   body += String(apol);
   body += F("';"
@@ -500,6 +520,9 @@ void WebPortal::handleSetup() {
     snprintf(buf, sizeof(buf), "%.2f", static_cast<double>(tempCoeffPpmPerC(tcpc)));
     body += buf;
   }
+  body += F("';"
+            "document.getElementById('ooff').value='");
+  body += String(static_cast<unsigned>(ooffMin));
   body += F("';"
             "document.getElementById('acllist').value=");
   // JSON-encode the ACL lines for safe JS string.
@@ -731,6 +754,27 @@ void WebPortal::handleSave() {
     }
   }
 
+  // OLED idle blanking timeout, in whole minutes (0 = always on).
+  bool savedScreen = false;
+  if (!doc["oledIdleMin"].isNull()) {
+    uint32_t mins = doc["oledIdleMin"].as<uint32_t>();
+    if (mins > 60) {
+      mins = 60;
+    }
+    AppSettings copy;
+    bool locked = false;
+    if (settingsLock(pdMS_TO_TICKS(200))) {
+      gSettings.oledIdleOffMs = mins * 60000UL;
+      copy = gSettings;
+      settingsUnlock();
+      locked = true;
+    }
+    if (locked) {
+      gStore.save(copy);
+      savedScreen = true;
+    }
+  }
+
   // Only touch WiFi creds when ssid is a real JSON string (not missing/null).
   if (doc["ssid"].is<const char*>()) {
     pendingSsid_ = doc["ssid"].as<const char*>();
@@ -757,9 +801,11 @@ void WebPortal::handleSave() {
     }
   }
 
-  if (savedPolicy || touchMgmt || savedAcl || savedTemp) {
+  if (savedPolicy || touchMgmt || savedAcl || savedTemp || savedScreen) {
     if (savedTemp) {
       server_.send(200, "text/plain", "Temp comp saved");
+    } else if (savedScreen) {
+      server_.send(200, "text/plain", "Screen timeout saved");
     } else if (savedAcl) {
       server_.send(200, "text/plain", "ACL saved");
     } else {

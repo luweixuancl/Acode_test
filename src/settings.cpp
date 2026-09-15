@@ -114,6 +114,9 @@ AppSettings SettingsStore::load() const {
     s.tempCoeffCenti = 500;
   }
 
+  // Display-only preference: not part of the CRC (missing key → default).
+  s.oledIdleOffMs = prefs_.getULong("ooff", OLED_IDLE_OFF_DEFAULT_MS);
+
   const uint16_t ver = prefs_.getUShort("ver", 0);
   const uint32_t storedCrc = prefs_.getUInt("crc", 0);
   // CRC is integrity hint only. NEVER clear WiFi on mismatch — that forced SoftAP
@@ -178,6 +181,7 @@ void SettingsStore::save(const AppSettings& s) const {
   }
   prefs_.putBool("tcmp", s.tempComp);
   prefs_.putShort("tcpc", s.tempCoeffCenti);
+  prefs_.putULong("ooff", s.oledIdleOffMs);
   prefs_.putUShort("ver", kSettingsVer);
   prefs_.putUInt("crc", settingsCrc(s));
 }

@@ -84,7 +84,40 @@ struct AppSettings {
   // Optional crystal temp trim (NVS tcmp / tcpc). Default Off.
   bool tempComp = CLK_TEMP_COMP_DEFAULT;
   int16_t tempCoeffCenti = CLK_TEMP_COEFF_CENTI;  // ppm/°C × 100
+  // OLED idle blanking timeout in ms; 0 = always on (NVS ooff).
+  uint32_t oledIdleOffMs = OLED_IDLE_OFF_DEFAULT_MS;
 };
+
+// Fixed pick list shared by OLED menu + web config (ms values).
+constexpr uint32_t kOledIdleOptions[] = {0, 60000, 300000, 600000, 1800000};
+constexpr uint8_t kOledIdleOptionCount =
+    sizeof(kOledIdleOptions) / sizeof(kOledIdleOptions[0]);
+constexpr uint8_t kOledIdleDefaultIdx = 3;  // 10 min
+
+inline const char* oledIdleMenuLabel(uint32_t ms) {
+  switch (ms) {
+    case 0:
+      return "Always";
+    case 60000:
+      return "1 min";
+    case 300000:
+      return "5 min";
+    case 1800000:
+      return "30 min";
+    case 600000:
+    default:
+      return "10 min";
+  }
+}
+
+inline uint8_t oledIdleIndexForMs(uint32_t ms) {
+  for (uint8_t i = 0; i < kOledIdleOptionCount; ++i) {
+    if (kOledIdleOptions[i] == ms) {
+      return i;
+    }
+  }
+  return kOledIdleDefaultIdx;
+}
 
 inline float tempCoeffPpmPerC(int16_t centi) {
   return static_cast<float>(centi) / 100.0f;

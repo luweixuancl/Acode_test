@@ -62,8 +62,9 @@
 #define DISPLAY_REFRESH_MS   250
 // OLED idle blanking: panel off (0xAE) after this much time without encoder
 // input or an incoming toast; any encoder action wakes it (first action only
-// wakes). Prevents 24/7 static-image burn-in on the home screen.
-#define OLED_IDLE_OFF_MS    600000   // 10 min; 0 = always on
+// wakes). Prevents 24/7 static-image burn-in on the home screen. Runtime
+// setting NVS `ooff` (AppSettings.oledIdleOffMs); this is the factory default.
+#define OLED_IDLE_OFF_DEFAULT_MS 600000  // 10 min; 0 = always on
 // Menu: FreeMono 9pt. 4 rows; bar shorter than pitch → gap.
 #define OLED_MENU_TEXT_SIZE    1
 #define OLED_MENU_ROWS         4

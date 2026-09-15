@@ -17,6 +17,7 @@ static const char* MENU_LABELS[] = {
     "Anomaly",
     "NTP ACL",
     "Temp Comp",
+    "Screen Off",
     "NTP Stats",
     "Restart",
 };
@@ -228,9 +229,9 @@ void DisplayUi::loop(EncoderInput& enc, GpsService& gps, WifiManager& wifi, NtpS
   }
   if (rot != 0 || click || longPress) {
     lastInputMs_ = millis();
-  } else if (OLED_IDLE_OFF_MS != 0 &&
+  } else if (idleOffMs_ != 0 &&
              static_cast<int32_t>(millis() - lastInputMs_) >=
-                 static_cast<int32_t>(OLED_IDLE_OFF_MS)) {
+                 static_cast<int32_t>(idleOffMs_)) {
     screenOff();
     return;
   }
@@ -263,6 +264,9 @@ void DisplayUi::loop(EncoderInput& enc, GpsService& gps, WifiManager& wifi, NtpS
     case UiMode::SetTempComp:
       handleTempComp(rot, click, longPress);
       break;
+    case UiMode::SetScreen:
+      handleScreen(rot, click, longPress);
+      break;
     case UiMode::NtpStats:
       handleNtpStats(rot, click, longPress);
       break;
@@ -287,6 +291,7 @@ void DisplayUi::loop(EncoderInput& enc, GpsService& gps, WifiManager& wifi, NtpS
   if (settingsLock(pdMS_TO_TICKS(20))) {
     settings = gSettings;
     settingsUnlock();
+    idleOffMs_ = settings.oledIdleOffMs;
   }
 
   const GpsStatus st = gps.snapshot();
@@ -323,6 +328,9 @@ void DisplayUi::loop(EncoderInput& enc, GpsService& gps, WifiManager& wifi, NtpS
       break;
     case UiMode::SetTempComp:
       drawTempComp(settings);
+      break;
+    case UiMode::SetScreen:
+      drawScreen();
       break;
     case UiMode::NtpStats:
       drawNtpStats(ntp);
@@ -611,6 +619,18 @@ void DisplayUi::drawAcl(const AppSettings& settings) {
   display_.println("rot=mode click=save");
 }
 
+void DisplayUi::drawScreen() {
+  display_.setCursor(0, 0);
+  display_.println("Screen Off");
+  char line[20];
+  snprintf(line, sizeof(line), ">%s", oledIdleMenuLabel(kOledIdleOptions[editScreenIdx_]));
+  monoLine(display_, 14, line, false);
+  display_.setCursor(0, 40);
+  display_.println("rot=chg click=save");
+  display_.setCursor(0, 52);
+  display_.println("long=back");
+}
+
 void DisplayUi::drawNtpStats(const NtpServer& ntp) {
   display_.setCursor(0, 0);
   display_.println("NTP Stats");
@@ -804,6 +824,13 @@ void DisplayUi::handleMenu(int8_t rot, bool click, bool longPress, WifiManager& 
         settingsUnlock();
       }
       mode_ = UiMode::SetTempComp;
+      break;
+    case MenuItem::ScreenOff:
+      if (settingsLock(pdMS_TO_TICKS(50))) {
+        editScreenIdx_ = oledIdleIndexForMs(gSettings.oledIdleOffMs);
+        settingsUnlock();
+      }
+      mode_ = UiMode::SetScreen;
       break;
     case MenuItem::NtpStats:
       mode_ = UiMode::NtpStats;
@@ -1042,6 +1069,32 @@ void DisplayUi::handleTempComp(int8_t rot, bool click, bool longPress) {
       gStore.save(copy);
     }
     showMessage(editTempComp_ ? "Tcomp On" : "Tcomp Off");
+  }
+}
+
+void DisplayUi::handleScreen(int8_t rot, bool click, bool longPress) {
+  if (longPress) {
+    mode_ = UiMode::Menu;
+    return;
+  }
+  if (rot != 0) {
+    editScreenIdx_ = (editScreenIdx_ + kOledIdleOptionCount + (rot > 0 ? 1 : -1)) %
+                     kOledIdleOptionCount;
+  }
+  if (click) {
+    AppSettings copy;
+    bool locked = false;
+    if (settingsLock(pdMS_TO_TICKS(100))) {
+      gSettings.oledIdleOffMs = kOledIdleOptions[editScreenIdx_];
+      copy = gSettings;
+      settingsUnlock();
+      locked = true;
+    }
+    if (locked) {
+      gStore.save(copy);
+      idleOffMs_ = copy.oledIdleOffMs;  // effective immediately
+    }
+    showMessage(String("Screen ") + oledIdleMenuLabel(copy.oledIdleOffMs));
   }
 }
 
