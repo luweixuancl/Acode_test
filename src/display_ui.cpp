@@ -103,6 +103,17 @@ static void menuDrawRow(Adafruit_SH1107& d, int16_t y, bool sel, const char* tex
   d.print(text);
 }
 
+void DisplayUi::bootMessage(const String& l1, const String& l2) {
+  display_.clearDisplay();
+  display_.setTextWrap(false);
+  display_.setTextColor(SH110X_WHITE);
+  display_.setTextSize(1);
+  display_.setCursor(0, 0);
+  display_.println(l1);
+  display_.println(l2);
+  display_.display();
+}
+
 void DisplayUi::begin() {
   Wire.begin(PIN_OLED_SDA, PIN_OLED_SCL);
   Wire.setClock(400000);
@@ -111,14 +122,7 @@ void DisplayUi::begin() {
     Serial.println("SH1107 init failed");
   }
   display_.setRotation(OLED_ROTATION);
-  display_.setTextWrap(false);
-  display_.clearDisplay();
-  display_.setTextColor(SH110X_WHITE);
-  display_.setTextSize(1);
-  display_.setCursor(0, 0);
-  display_.println("ESP32-C3 NTP");
-  display_.println("Booting...");
-  display_.display();
+  bootMessage("ESP32-C3 NTP", "Booting...");
   lastInputMs_ = millis();
   Serial.printf("[ui] OLED menu FreeMono9pt rows=%u rowH=%u mark=%s\n",
                 static_cast<unsigned>(OLED_MENU_ROWS),

@@ -62,6 +62,38 @@ static bool startStaConnect(const AppSettings& settings, bool stopApOnOk) {
   return true;
 }
 
+static void factoryResetNow() {
+  Serial.println("[reset] FACTORY RESET: wiping settings namespace");
+  gUi.bootMessage("Factory reset", "clearing...");
+  gStore.reset();
+  AppSettings def;  // all defaults; also writes fresh ver/crc
+  gStore.save(def);
+  Serial.println("[reset] config cleared - restarting");
+  gUi.bootMessage("Config reset", "restarting...");
+  delay(800);
+  ESP.restart();
+}
+
+// Cold-boot escape hatch: hold the encoder switch through power-on; after
+// FACTORY_RESET_HOLD_MS every setting returns to defaults (new SoftAP flow).
+static void checkFactoryReset() {
+  if (digitalRead(PIN_ENC_SW) != LOW) {
+    return;  // normal boot (pullup is set by gEnc.begin())
+  }
+  Serial.println("[reset] SW held at boot - keep holding 3s to factory reset");
+  gUi.bootMessage("Hold 3s = reset", "release = cancel");
+  const uint32_t start = millis();
+  while (digitalRead(PIN_ENC_SW) == LOW) {
+    if (millis() - start >= FACTORY_RESET_HOLD_MS) {
+      factoryResetNow();
+      return;
+    }
+    delay(10);
+  }
+  Serial.println("[reset] released early - normal boot");
+  gUi.bootMessage("ESP32-C3 NTP", "Booting...");
+}
+
 static void openSetupApIfNeeded(const char* uiMsg) {
   if (gWifi.isStaConnected() || gIpc.setupAp) {
     return;
@@ -605,11 +637,14 @@ void setup() {
   }
 
   gStore.begin();
-  gSettings = gStore.load();
 
   gEnc.begin();
   gLeds.begin();
   gUi.begin();
+  checkFactoryReset();  // hold SW 3s at power-on → wipe all settings, reboot
+
+  gSettings = gStore.load();
+
   gGps.begin();
   gWifi.begin();
   gNtp.begin();

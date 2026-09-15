@@ -150,6 +150,9 @@ class SettingsStore {
   void begin();
   AppSettings load() const;
   void save(const AppSettings& s) const;
+  // Factory reset: wipe every key in the settings namespace (WiFi, passwords,
+  // static IP, tz, policy, ACL, temp comp, oled idle, ver/crc).
+  void reset();
 
  private:
   mutable Preferences prefs_;

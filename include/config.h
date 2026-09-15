@@ -65,6 +65,9 @@
 // wakes). Prevents 24/7 static-image burn-in on the home screen. Runtime
 // setting NVS `ooff` (AppSettings.oledIdleOffMs); this is the factory default.
 #define OLED_IDLE_OFF_DEFAULT_MS 600000  // 10 min; 0 = always on
+// Factory reset: hold the encoder switch this long through power-on to wipe
+// all settings back to defaults (checked in setup() before settings load).
+#define FACTORY_RESET_HOLD_MS    3000
 // Menu: FreeMono 9pt. 4 rows; bar shorter than pitch → gap.
 #define OLED_MENU_TEXT_SIZE    1
 #define OLED_MENU_ROWS         4

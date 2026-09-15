@@ -47,6 +47,8 @@ class DisplayUi {
  public:
   void begin();
   void loop(EncoderInput& enc, GpsService& gps, WifiManager& wifi, NtpServer& ntp);
+  // Raw two-line splash usable before the UI task starts (boot / factory reset).
+  void bootMessage(const String& l1, const String& l2);
 
   void showMessage(const String& msg);
   void onScanResults(const std::vector<WifiNetwork>& nets);

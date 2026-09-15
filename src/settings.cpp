@@ -46,6 +46,10 @@ void SettingsStore::begin() {
   prefs_.begin("ntp-srv", false);
 }
 
+void SettingsStore::reset() {
+  prefs_.clear();
+}
+
 AppSettings SettingsStore::load() const {
   AppSettings s;
   s.wifiSsid = prefs_.getString("ssid", "");
