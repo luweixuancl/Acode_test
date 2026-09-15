@@ -141,7 +141,7 @@
 
 ### 2.6 固件代码分析与修复（2026-09-10）
 
-**服务器固件已开源**：`github.com/luweixuancl/Acode_test`，分支 `cursor/esp32c3-status-leds-5075`。硬件：合宙 CORE ESP32-C3 + DX-GP22 GNSS（1PPS + NMEA@9600）+ SSD1306 + KY-040。本地已 clone 并新建修复分支 `fix/time-alignment`（3 个提交），补丁导出于 `patches/`。
+**服务器固件已开源**：`github.com/luweixuancl/esp32c3-gnss-ntp`（原名 `Acode_test`，2026-09-14 更名，旧地址 301 重定向；下文涉及的历史分支现已清理），分支 `cursor/esp32c3-status-leds-5075`。硬件：合宙 CORE ESP32-C3 + DX-GP22 GNSS（1PPS + NMEA@9600）+ SSD1306 + KY-040。本地已 clone 并新建修复分支 `fix/time-alignment`（3 个提交），补丁导出于 `patches/`。
 
 **实测现象 ↔ 代码缺陷精确对应：**
 
@@ -272,3 +272,4 @@ adb shell cmd network_time_update_service force-refresh
 | 2026-09-10 | 新增 2.6 节：固件开源代码（Acode_test@esp32c3-status-leds-5075）病因定位——NMEA/PPS 秒对齐竞态（-1s）+ 主循环阻塞致 NMEA 丢帧（多秒失步）；本地分支 fix/time-alignment 完成 3 项修复（PPS 计数对齐 / 元数据诚实化 / 主循环去阻塞），补丁见 patches/，待烧录复测 |
 | 2026-09-10 | 新增 2.7 节：RTOS 三任务化（feat/rtos-tasks 分支）——time(5)/net(2)/ui(1) 抢占式隔离 + portMUX 快照 + 队列请求 + 统一设置锁；补丁 0004；与 2.6 可 A/B 对比烧录 |
 | 2026-09-10 | 新增 2.8 节：分支交付与推送状态——本机直推不可行（github.com 超时 + 无凭证 + 代理只读），生成 bundle 与 4 个 patch 供外部推送，待办 I 跟踪 |
+| 2026-09-15 | 进度注记：2.6/2.7 的修复均已合入主线并发布 v1.0.0（仓库更名 `esp32c3-gnss-ntp`，历史分支与旧 bundle 流程已由主干取代）；固件现状为 Stratum-1 长期稳定运行（LCK，residual 0ms），原始问题不再复现 |

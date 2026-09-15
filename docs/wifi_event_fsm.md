@@ -50,7 +50,7 @@ Connected --DISC--> armed
 ## 扫描
 
 - `startScan` 异步 `scanNetworks`；完成以 `SCAN_DONE` 为主，`scanComplete` 为双保险。
-- SoftAP 逃生是纯 `WIFI_AP`，**没有 STA 接口时 `scanNetworks` 会失败或 0 个 AP**。编码器/网页扫描前若当前是 `WIFI_AP`/`OFF`，先切到 `WIFI_AP_STA`（或 `STA`）再扫。
+- SoftAP 配网是纯 `WIFI_AP`，**没有 STA 接口时 `scanNetworks` 会失败或 0 个 AP**。编码器/网页扫描前若当前是 `WIFI_AP`/`OFF`，先切到 `WIFI_AP_STA`（或 `STA`）再扫。
 - 编码器扫网：STA 正在 `Connecting` 时**不** `abortJoin`（会立刻 OLED「失败」，随后才出现 `SCAN_DONE`）。保持 Scanning...，等 `GOT_IP` / heal 后再 `startScan`；仅超时才 `ScanFailed`。
 - 结果写入 `lastScan_`；`NetWork::Scanning`（OLED）与 Web `/scan` 都读同一缓存。空列表算成功（OLED 显示 No APs，可再点重试），不再当成 Scan failed。
 - ARP probe 期间 `startScan` 仍失败 → Web 返回 `busy`。
@@ -66,7 +66,7 @@ Connected --DISC--> armed
 | 15 | `4WAY_HANDSHAKE_TIMEOUT`（密码错误常见） |
 | 200+ | 无 AP / 信号丢失等（依 IDF 版本） |
 
-连接中对 reason 2/3/8 保持等待 GOT_IP；`healIfStaUp` 在 FSM 误判 Failed 但射频已拿到 IP 时收复链路，避免下一轮 reconnect 把好连接踢掉后进 SoftAP。
+连接中对 reason 2/3/8 保持等待 GOT_IP；`healIfStaUp` 在 FSM 误判 Failed 但射频已拿到 IP 时收复链路，避免下一轮 reconnect 把好连接踢掉。
 
 ## SoftAP 配网（仅手动）
 

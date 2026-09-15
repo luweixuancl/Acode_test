@@ -165,7 +165,7 @@
 # Termux
 pkg install python
 curl -L -o ntp_cmp_termux.py \
-  https://ghproxy.net/https://raw.githubusercontent.com/luweixuancl/Acode_test/cursor/ntp-phase-a-metadata-c502/tools/ntp_cmp_termux.py
+  https://ghproxy.net/https://raw.githubusercontent.com/luweixuancl/esp32c3-gnss-ntp/main/tools/ntp_cmp_termux.py
 python ntp_cmp_termux.py --gps 10.81.127.143 --minutes 10
 ```
 
