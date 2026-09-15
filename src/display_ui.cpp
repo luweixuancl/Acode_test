@@ -118,15 +118,36 @@ void DisplayUi::begin() {
   display_.println("ESP32-C3 NTP");
   display_.println("Booting...");
   display_.display();
+  lastInputMs_ = millis();
   Serial.printf("[ui] OLED menu FreeMono9pt rows=%u rowH=%u mark=%s\n",
                 static_cast<unsigned>(OLED_MENU_ROWS),
                 static_cast<unsigned>(OLED_MENU_ROW_H), OLED_UI_MARK);
 }
 
 void DisplayUi::showMessage(const String& msg) {
+  // Incoming toasts (OK <ip>, WiFi lost, ...) wake a blanked panel.
+  if (screenOff_) {
+    screenOn();
+  }
   message_ = msg;
   messageUntil_ = millis() + 2500;
   mode_ = UiMode::Message;
+}
+
+void DisplayUi::screenOn() {
+  screenOff_ = false;
+  lastInputMs_ = millis();
+  display_.oled_command(SH110X_DISPLAYON);
+  lastDrawMs_ = 0;  // force immediate full redraw
+  Serial.println("[ui] OLED on (input)");
+}
+
+void DisplayUi::screenOff() {
+  display_.clearDisplay();
+  display_.display();
+  display_.oled_command(SH110X_DISPLAYOFF);
+  screenOff_ = true;
+  Serial.println("[ui] OLED idle → panel off");
 }
 
 void DisplayUi::onScanResults(const std::vector<WifiNetwork>& nets) {
@@ -196,6 +217,23 @@ void DisplayUi::loop(EncoderInput& enc, GpsService& gps, WifiManager& wifi, NtpS
   int8_t rot = enc.consumeRotate();
   bool click = enc.consumeClick();
   bool longPress = enc.consumeLongPress();
+
+  // OLED idle blanking: while the panel is off, the first encoder action only
+  // wakes it (no navigation), so nothing can be triggered blindly.
+  if (screenOff_) {
+    if (rot != 0 || click || longPress) {
+      screenOn();
+    }
+    return;
+  }
+  if (rot != 0 || click || longPress) {
+    lastInputMs_ = millis();
+  } else if (OLED_IDLE_OFF_MS != 0 &&
+             static_cast<int32_t>(millis() - lastInputMs_) >=
+                 static_cast<int32_t>(OLED_IDLE_OFF_MS)) {
+    screenOff();
+    return;
+  }
 
   switch (mode_) {
     case UiMode::Home:

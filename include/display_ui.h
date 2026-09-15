@@ -75,6 +75,8 @@ class DisplayUi {
   void handleNtpStats(int8_t rot, bool click, bool longPress);
   void drainUiMessages();
   void requestWifiScan();
+  void screenOn();
+  void screenOff();
 
   Adafruit_SH1107 display_{OLED_WIDTH, OLED_HEIGHT, &Wire, -1};
   UiMode mode_ = UiMode::Home;
@@ -97,4 +99,6 @@ class DisplayUi {
   String message_;
   uint32_t messageUntil_ = 0;
   uint32_t lastDrawMs_ = 0;
+  bool screenOff_ = false;
+  uint32_t lastInputMs_ = 0;
 };
