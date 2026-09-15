@@ -93,8 +93,10 @@ uint32_t WifiManager::backoffMsForAttempt(uint8_t attempt) {
       return WIFI_RECONNECT_BACKOFF_2_MS;
     case 3:
       return WIFI_RECONNECT_BACKOFF_3_MS;
-    default:
+    case 4:
       return WIFI_RECONNECT_BACKOFF_4_MS;
+    default:
+      return WIFI_RECONNECT_BACKOFF_5_MS;
   }
 }
 
@@ -349,8 +351,13 @@ bool WifiManager::pollAutoReconnect(AppSettings* outSettings) {
   }
 
   const uint32_t now = millis();
-  if (static_cast<int32_t>(now - reconnectWindowStartMs_) >= static_cast<int32_t>(WIFI_RECONNECT_GIVEUP_MS) ||
-      reconnectAttempt_ >= WIFI_RECONNECT_MAX_ATTEMPTS) {
+  // Limits of 0 = unlimited: retry forever with capped backoff. SoftAP is
+  // manual-only (menu Web Setup), never an automatic escape from signal loss.
+  if ((WIFI_RECONNECT_GIVEUP_MS != 0 &&
+       static_cast<int32_t>(now - reconnectWindowStartMs_) >=
+           static_cast<int32_t>(WIFI_RECONNECT_GIVEUP_MS)) ||
+      (WIFI_RECONNECT_MAX_ATTEMPTS != 0 &&
+       reconnectAttempt_ >= WIFI_RECONNECT_MAX_ATTEMPTS)) {
     Serial.println("[wifi] auto-reconnect give up");
     cancelAutoReconnect();
     reconnectGaveUp_ = true;

@@ -60,6 +60,10 @@
 
 // UI / timing
 #define DISPLAY_REFRESH_MS   250
+// OLED idle blanking: panel off (0xAE) after this much time without encoder
+// input or an incoming toast; any encoder action wakes it (first action only
+// wakes). Prevents 24/7 static-image burn-in on the home screen.
+#define OLED_IDLE_OFF_MS    600000   // 10 min; 0 = always on
 // Menu: FreeMono 9pt. 4 rows; bar shorter than pitch → gap.
 #define OLED_MENU_TEXT_SIZE    1
 #define OLED_MENU_ROWS         4
@@ -77,14 +81,17 @@
 #define WIFI_SCAN_UI_TIMEOUT_MS 40000
 #define WIFI_SCAN_CACHE_MS       8000  // reuse lastScan_ instead of scanDelete()
 #define IP_CONFLICT_TIMEOUT_MS   800
-// Auto-reconnect backoff (ms): attempt 1 immediate, then 2s/5s/10s/30s...
-#define WIFI_RECONNECT_MAX_ATTEMPTS    5
-#define WIFI_RECONNECT_GIVEUP_MS  120000
+// Auto-reconnect: unlimited retries — signal loss must never become SoftAP
+// provisioning (OLED "Web Setup" is the manual path). Backoff: immediate,
+// 2s/5s/10s/30s, then steady 60s retry forever. Limits of 0 = unlimited.
+#define WIFI_RECONNECT_MAX_ATTEMPTS      0
+#define WIFI_RECONNECT_GIVEUP_MS         0
 #define WIFI_RECONNECT_BACKOFF_0_MS      0
 #define WIFI_RECONNECT_BACKOFF_1_MS   2000
 #define WIFI_RECONNECT_BACKOFF_2_MS   5000
 #define WIFI_RECONNECT_BACKOFF_3_MS  10000
 #define WIFI_RECONNECT_BACKOFF_4_MS  30000
+#define WIFI_RECONNECT_BACKOFF_5_MS  60000
 // Boot: first STA fail arms reconnect; SoftAP only after give-up (not after 1x 201).
 #define WIFI_BOOT_SOFTAP_AFTER_GIVEUP 1
 #define GPS_NMEA_MAX_BYTES_PER_LOOP 256

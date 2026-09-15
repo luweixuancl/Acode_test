@@ -39,8 +39,8 @@ Connected ──DISC──► Idle（武装 Reconnect）
 ```
 Connected --DISC--> armed
   attempt 1: 立即 beginConnect（同一凭据）
-  attempt 2..N: 退避 2s / 5s / 10s / 30s（上限 30s）
-  连续失败 ≥5 或累计 >2min → SoftAP 逃生（`NTP-Setup-XXXX`）
+  attempt 2..N: 退避 2s / 5s / 10s / 30s，之后稳定 60s 一轮，无限重试
+  无放弃阈值：信号消失只周期性搜寻重连，绝不自动开 SoftAP
 ```
 
 手动 Connect 会 `cancelAutoReconnect()`；Scan 不取消（扫描与 STA 重连可并行）。
@@ -68,9 +68,10 @@ Connected --DISC--> armed
 
 连接中对 reason 2/3/8 保持等待 GOT_IP；`healIfStaUp` 在 FSM 误判 Failed 但射频已拿到 IP 时收复链路，避免下一轮 reconnect 把好连接踢掉后进 SoftAP。
 
-## SoftAP 逃生
+## SoftAP 配网（仅手动）
 
-- STA 失败 / 重连放弃后进入 **纯 `WIFI_AP`**（不是 `AP_STA`）。
+- 进入条件只有两处：**开机时无已存 SSID**、**菜单 Web Setup 手动触发**。重连永不放弃，因此信号丢失/密码变化不再自动切 SoftAP（NTP 设备应始终留在原网段重试）。
+- 进入后为 **纯 `WIFI_AP`**（不是 `AP_STA`）。
 - 原因：`AP_STA` 下残留 STA 扫描常导致 SoftAP **不发 beacon**，手机/电脑扫不到 SSID，但串口仍打印 `Setup AP`。
 - SoftAP 仅 **2.4 GHz**（ESP32-C3 无 5 GHz）。手机若只看 5G 列表会漏掉；请在 2.4G WiFi 列表中找 `NTP-Setup-XXXX`。
 - SoftAP 密码默认 **`NTP-`+模块 MAC 低 16 位十六进制**（串口打印 `MAC=` / `SoftAP default pass=`）；NVS `appw` 可覆盖。
